@@ -15,7 +15,7 @@ Full design rationale and architecture: see [PLAN.md](PLAN.md).
 
 ---
 
-## Current state: Phase 1 + MCP + Phase 2 + Pine Script + Phase 3 (Trade Journal) + Phase 4 (Orderflow) complete ✅
+## Current state: Phase 1 + MCP + Phase 2 + Pine Script + Phase 3 (Trade Journal) + Phase 4 (Orderflow) + Phase 5 (Backtest) complete ✅
 
 ### What's built and tested
 
@@ -86,7 +86,7 @@ Teal/Red = FVG · Blue/Orange = OB · Lime/Maroon = IFVG · Aqua/Fuchsia = Break
 - Commands: `analyze`, `switch <SYMBOL>`, `model <name>`, `verbose`, `history`, `read <N>`
 - Unrecognised input → treated as a follow-up query (chat mode)
 
-**Tests — 141/141 pass** (`python -m pytest tests/`):
+**Tests — 201/201 pass** (`python -m pytest tests/`):
 - `test_detectors_fvg.py` — 6 tests
 - `test_detectors_ms.py` — 6 tests
 - `test_detectors_bos.py` — 4 tests (including MSS detection)
@@ -103,6 +103,9 @@ Teal/Red = FVG · Blue/Orange = OB · Lime/Maroon = IFVG · Aqua/Fuchsia = Break
 - `test_journal.py` — 33 tests *(Phase 3: Trade Journal)*
 - `test_detectors_cumulative_delta.py` — 15 tests *(Phase 4: Orderflow)*
 - `test_detectors_volume_profile.py` — 17 tests *(Phase 4: Orderflow)*
+- `test_backtest_rules.py` — 23 tests *(Phase 5: Backtest)*
+- `test_backtest_simulate.py` — 19 tests *(Phase 5: Backtest)*
+- `test_backtest_engine.py` — 10 tests *(Phase 5: Backtest)*
 
 **Journal module** (`copilot/journal/`):
 
@@ -179,9 +182,28 @@ This is the **foundation** for Phases 5–7 — no stats or backtest without cle
 
 **`detect_volume_profile`** — returns `poc`, `vah`, `val`, `hvn_nodes`, `lvn_nodes` (each with `price_mid/low/high`, `volume_pct`), `current_price_location`, `nearest_hvn/lvn_above/below` with `distance_atr`. Supports `session_bars` for intraday vs composite profiles.
 
-### Phase 5 — Backtest engine (MEDIUM, after Phase 3+4 schemas are frozen)
+### Phase 5 — Backtest engine ✅ DONE
 
-`copilot/backtest/` — runs detectors over historical OHLC bar-by-bar (no look-ahead). Each triggered entry written to journal as `record_type="backtest"`. Enables live vs backtest comparison on the same metrics.
+Bar-by-bar historical simulation using the detector library. Strict look-ahead prevention: detectors receive `df.iloc[:i+1]`. Results written to journal as `record_type="backtest"` with `run_id` tag for grouping and live vs backtest comparison.
+
+**Module: `copilot/backtest/`**
+
+| File | Purpose |
+|---|---|
+| `rules.py` | `Condition` + `SetupRule` dataclasses, dotted-path field navigation, `evaluate_conditions()`, built-in rules |
+| `simulate.py` | `simulated_exit()` (SL wins on same-bar conflict), `resolve_entry/sl/tp()` |
+| `engine.py` | `BacktestEngine.run()` — IDLE→SIGNAL→IN_TRADE state machine, `BacktestSummary` dataclass |
+| `report.py` | `trades_to_summary()`, `print_summary()`, `write_summary_to_journal()` |
+
+**Built-in rules:** `fvg_ob_long`, `sweep_bos_long`, `ob_fvg_short`
+
+**`sl_logic` options:** `atr:N`, `pct:N`, `swing`, `ob`, `fvg`
+
+**`tp_logic` options:** `rr:N`, `liquidity`, `next_hvn`
+
+**`entry_after` options:** `next_open`, `signal_close`, `fvg_ce`, `ob_midpoint`
+
+**New REPL command:** `backtest --rule sweep_bos_long --tf 1h --bars 1000 [--no-write]`
 
 ### Phase 6 — Statistics aggregation (MEDIUM, after ≥30 journal records)
 

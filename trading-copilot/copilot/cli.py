@@ -19,6 +19,10 @@ REPL commands:
            [--symbol S] [--last N]
            [--account A] [--tag T]
     edit <id>                              — update exit/result for a trade
+    backtest --rule RULE [--symbol S]      — run historical backtest
+             [--tf TF] [--bars N]
+             [--start DATE] [--end DATE]
+             [--no-write] [--list-rules]
     help                                   — show this help
     exit / quit                            — exit the REPL
 """
@@ -269,6 +273,76 @@ def _do_edit(rest: str) -> None:
     print(f"  Updated {rec.id[:8]}.")
 
 
+def _do_backtest(rest: str, default_symbol: str) -> None:
+    from copilot.backtest.rules import BUILTIN_RULES, SetupRule
+    from copilot.backtest.engine import BacktestEngine
+    from copilot.backtest.report import print_summary
+    from copilot.data.binance import BinanceSource
+    import json
+
+    parser = argparse.ArgumentParser(add_help=False, exit_on_error=False)
+    parser.add_argument("--rule", default=None)
+    parser.add_argument("--symbol", default=default_symbol)
+    parser.add_argument("--tf", default="1h")
+    parser.add_argument("--bars", type=int, default=1000)
+    parser.add_argument("--start", default=None)
+    parser.add_argument("--end", default=None)
+    parser.add_argument("--no-write", action="store_true", dest="no_write")
+    parser.add_argument("--list-rules", action="store_true", dest="list_rules")
+
+    try:
+        args = parser.parse_args(shlex.split(rest) if rest else [])
+    except (argparse.ArgumentError, SystemExit):
+        print("  Usage: backtest --rule RULE [--symbol S] [--tf TF] [--bars N] [--start DATE] [--end DATE] [--no-write]")
+        return
+
+    if args.list_rules:
+        print("  Built-in rules:")
+        for name, rule in BUILTIN_RULES.items():
+            n_cond = len(rule.conditions)
+            print(f"    {name:<20} {rule.direction:<5}  {n_cond} conditions  sl={rule.sl_logic}  tp={rule.tp_logic}")
+        return
+
+    if not args.rule:
+        print("  --rule is required. Use --list-rules to see available rules.")
+        return
+
+    # Resolve rule
+    if args.rule in BUILTIN_RULES:
+        rule = BUILTIN_RULES[args.rule]
+    elif args.rule.endswith(".json"):
+        try:
+            rule = SetupRule.from_dict(json.loads(Path(args.rule).read_text(encoding="utf-8")))
+        except Exception as e:
+            print(f"  Failed to load rule from {args.rule}: {e}")
+            return
+    else:
+        names = ", ".join(BUILTIN_RULES.keys())
+        print(f"  Unknown rule '{args.rule}'. Built-ins: {names}")
+        print("  Or provide a path to a .json rule file.")
+        return
+
+    symbol = args.symbol.upper()
+    print(f"\n  Running backtest: {rule.name} · {symbol} · {args.tf}")
+    print(f"  Bars: {args.bars}  start: {args.start or '—'}  end: {args.end or '—'}")
+    print(f"  Write to journal: {not args.no_write}\n")
+
+    try:
+        engine = BacktestEngine(source=BinanceSource())
+        summary = engine.run(
+            symbol=symbol,
+            tf=args.tf,
+            rule=rule,
+            bars=args.bars,
+            start=args.start,
+            end=args.end,
+            write_journal=not args.no_write,
+        )
+        print_summary(summary)
+    except Exception as e:
+        print(f"  Backtest error: {e}")
+
+
 def _check_api_key() -> None:
     if not os.getenv("ANTHROPIC_API_KEY"):
         print(
@@ -399,6 +473,9 @@ def main() -> None:
                 _do_edit(rest)
             except (KeyboardInterrupt, EOFError):
                 print("\n  Cancelled.")
+
+        elif cmd in ("backtest", "bt"):
+            _do_backtest(rest, session.symbol)
 
         elif cmd == "analyze":
             query = rest or "Perform a full multi-timeframe market analysis."
