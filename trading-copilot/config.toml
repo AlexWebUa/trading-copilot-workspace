@@ -1,0 +1,31 @@
+[llm]
+default_model = "claude-sonnet-4-6"
+heavy_model = "claude-opus-4-7"
+max_turns = 12
+max_tokens = 4096
+
+[data]
+default_bars = 500
+# Cache TTL in seconds per timeframe
+cache_ttl = { "1m" = 60, "3m" = 60, "5m" = 60, "15m" = 300, "1h" = 300, "4h" = 3600, "1d" = 3600 }
+
+[instruments]
+crypto = ["BTCUSDT", "ETHUSDT"]
+# Future: metals = ["XAUUSD"], forex = ["EURUSD"], indices = ["NAS100", "SPX500"]
+
+[sessions]
+# All times are Europe/Kyiv (UTC+3 in summer, UTC+2 in winter)
+ott_start = "09:00"
+ott_end = "17:00"
+killzones = ["09:00", "15:00", "17:00"]
+
+[kb]
+# Relative to project root (or knowledge_base/ sibling dir)
+path = "../knowledge_base"
+always_inject = [
+    "00_Index/_Global_Rules.md",
+    "00_Index/_MOC.md",
+    "01_Concepts/Multi_TF_Analysis.md",
+    "08_Entry_Models/Entry_Models.md",
+    "99_Glossary/Glossary.md",
+]
