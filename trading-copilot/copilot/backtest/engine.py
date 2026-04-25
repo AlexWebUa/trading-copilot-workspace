@@ -33,6 +33,14 @@ from copilot.journal.record import TradeRecord, compute_rr, session_from_ts
 # Minimum bars before the engine starts evaluating signals
 _MIN_LEADING_BARS = 50
 
+# Detectors that require buy_vol/sell_vol/delta columns — triggers delta fetch
+_DELTA_DETECTORS = frozenset({"detect_cumulative_delta"})
+
+
+def _needs_delta(rule: SetupRule) -> bool:
+    """Return True if any condition in rule references a delta-only detector."""
+    return any(c.detector in _DELTA_DETECTORS for c in rule.conditions)
+
 # Timeframe → minutes lookup for date-range bar count estimation
 _TF_MINUTES = {
     "1m": 1, "3m": 3, "5m": 5, "15m": 15,
@@ -125,7 +133,7 @@ class BacktestEngine:
         rule.validate()
         symbol = symbol.upper()
 
-        df = self._fetch_data(symbol, tf, bars, start, end)
+        df = self._fetch_data(symbol, tf, bars, start, end, rule=rule)
         if df.empty:
             return self._empty_summary(str(uuid.uuid4()), symbol, tf, rule, df)
 
@@ -301,32 +309,44 @@ class BacktestEngine:
         bars: int,
         start: str | None,
         end: str | None,
+        rule: "SetupRule | None" = None,
     ) -> pd.DataFrame:
+        # Determine how many bars we need
         if start is None and end is None:
-            return self._source.get_ohlc(symbol, tf, bars)
-
-        # Date-range fetch
-        tf_min = _TF_MINUTES.get(tf, 60)
-        start_dt = _parse_date(start) if start else None
-        end_dt = _parse_date(end) if end else datetime.now(timezone.utc)
-
-        if start_dt:
-            total_min = (end_dt - start_dt).total_seconds() / 60
-            bars_needed = min(int(total_min / tf_min) + 20, 5000)
-        else:
             bars_needed = bars
+        else:
+            tf_min = _TF_MINUTES.get(tf, 60)
+            start_dt = _parse_date(start) if start else None
+            end_dt = _parse_date(end) if end else datetime.now(timezone.utc)
+            if start_dt:
+                total_min = (end_dt - start_dt).total_seconds() / 60
+                bars_needed = min(int(total_min / tf_min) + 20, 5000)
+            else:
+                bars_needed = bars
+            if bars_needed > 5000:
+                print(f"WARNING: date range exceeds 5000 bars cap — truncating.")
+                bars_needed = 5000
 
-        if bars_needed > 5000:
-            print(f"WARNING: date range exceeds 5000 bars cap — truncating.")
-            bars_needed = 5000
-
-        df = self._source.get_ohlc(symbol, tf, bars_needed)
+        # Decide fetch method: delta-enriched or plain OHLCV
+        use_delta = rule is not None and _needs_delta(rule)
+        if use_delta:
+            try:
+                from copilot.data.binance import fetch_ohlcv_with_delta
+                df = fetch_ohlcv_with_delta(symbol, tf, bars_needed, market="futures")
+            except Exception:
+                # Graceful fallback — still run with plain OHLCV if delta unavailable
+                df = self._source.get_ohlc(symbol, tf, bars_needed)
+        else:
+            df = self._source.get_ohlc(symbol, tf, bars_needed)
 
         # Trim to date range
-        if start_dt:
-            df = df[df.index >= pd.Timestamp(start_dt, tz="UTC")]
-        if end_dt:
-            df = df[df.index <= pd.Timestamp(end_dt, tz="UTC")]
+        if start is not None or (start is None and end is not None):
+            start_dt = _parse_date(start) if start else None
+            end_dt = _parse_date(end) if end else datetime.now(timezone.utc)
+            if start_dt:
+                df = df[df.index >= pd.Timestamp(start_dt, tz="UTC")]
+            if end_dt:
+                df = df[df.index <= pd.Timestamp(end_dt, tz="UTC")]
         return df
 
     def _empty_summary(
