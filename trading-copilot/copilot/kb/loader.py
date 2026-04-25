@@ -110,10 +110,7 @@ class KBLoader:
             # Skip index/admin files
             if md.name.startswith("_"):
                 continue
-            try:
-                text = md.read_text(encoding="utf-8")
-            except UnicodeDecodeError:
-                continue
+            text = md.read_text(encoding="utf-8", errors="replace")
 
             fm, body = _parse_frontmatter(text)
             if skip_stubs and fm.get("status") == "stub":
@@ -141,7 +138,7 @@ class KBLoader:
         # Direct load if not yet indexed
         p = self._root / relative_path
         if p.exists():
-            text = p.read_text(encoding="utf-8")
+            text = p.read_text(encoding="utf-8", errors="replace")
             fm, body = _parse_frontmatter(text)
             return Note(
                 title=fm.get("title") or p.stem,
