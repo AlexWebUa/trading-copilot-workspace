@@ -15,7 +15,7 @@ Full design rationale and architecture: see [PLAN.md](PLAN.md).
 
 ---
 
-## Current state: Phase 1 + MCP + Phase 2 + Pine Script complete ✅
+## Current state: Phase 1 + MCP + Phase 2 + Pine Script + Phase 3 (Trade Journal) complete ✅
 
 ### What's built and tested
 
@@ -79,7 +79,7 @@ Teal/Red = FVG · Blue/Orange = OB · Lime/Maroon = IFVG · Aqua/Fuchsia = Break
 - Commands: `analyze`, `switch <SYMBOL>`, `model <name>`, `verbose`, `history`, `read <N>`
 - Unrecognised input → treated as a follow-up query (chat mode)
 
-**Tests — 76/76 pass** (`python -m pytest tests/`):
+**Tests — 109/109 pass** (excluding 4 pre-existing `test_agent_loop` failures caused by a truncated `Glossary.md` in the workspace — unrelated to journal) (`python -m pytest tests/`):
 - `test_detectors_fvg.py` — 6 tests
 - `test_detectors_ms.py` — 6 tests
 - `test_detectors_bos.py` — 4 tests (including MSS detection)
@@ -93,6 +93,25 @@ Teal/Red = FVG · Blue/Orange = OB · Lime/Maroon = IFVG · Aqua/Fuchsia = Break
 - `test_detectors_compression.py` — 7 tests *(Phase 2)*
 - `test_detectors_sessions.py` — 8 tests *(Phase 2)*
 - `test_pine_script.py` — 11 tests *(Pine Script)*
+- `test_journal.py` — 33 tests *(Phase 3: Trade Journal)*
+
+**Journal module** (`copilot/journal/`):
+
+| File | Purpose |
+|---|---|
+| [`copilot/journal/record.py`](copilot/journal/record.py) | `TradeRecord` dataclass + `compute_rr`, `session_from_ts`, `parse_ts` utilities |
+| [`copilot/journal/writer.py`](copilot/journal/writer.py) | `append_record` (JSONL append), `update_record` (in-place rewrite) |
+| [`copilot/journal/reader.py`](copilot/journal/reader.py) | `load_all`, `filter_by` (11 dimensions), `get_by_id` (prefix match) |
+| [`copilot/journal/__init__.py`](copilot/journal/__init__.py) | Re-exports all public API |
+
+**New REPL commands**:
+- `log` — interactive prompt to record a new trade; auto-detects session from ts_entry (Kyiv TZ), auto-computes R:R from entry/SL/TP1
+- `trades [--setup X] [--result Y] [--symbol S] [--last N] [--account A] [--tag T]` — filtered table view
+- `edit <id-prefix>` — update exit price, result, pnl_r, notes, tags on a pending record
+
+**Storage**: `~/.trading-copilot/journal/journal.jsonl` — append-only, one JSON object per line.
+
+**Record schema tags** used for aggregation (Phase 6): `symbol`, `account_type`, `setup_name`, `tools_confirmed`, `direction`, `result`, `session`, `killzone`, `day_of_week`, `htf_bias`, `record_type` (trade vs backtest).
 
 ---
 
@@ -131,7 +150,7 @@ python -m copilot --symbol ETHUSDT --verbose
 
 ## Roadmap
 
-### Phase 3 — Trade Journal ★ **START HERE** (HIGH priority)
+### Phase 3 — Trade Journal ✅ DONE
 
 Append-only `journal.jsonl` at `~/.trading-copilot/journal/`. One `TradeRecord` per trade or backtest entry. Schema covers: symbol, account_type (demo/phase1/phase2/live), setup_name, tools_confirmed, direction, entry/exit/SL/TP prices, result, pnl_r, session, killzone, day_of_week, htf_bias, tags.
 
@@ -139,7 +158,7 @@ New module: `copilot/journal/` (record, writer, reader). New REPL commands: `log
 
 This is the **foundation** for Phases 5–7 — no stats or backtest without clean journal data.
 
-### Phase 4 — Orderflow detectors
+### Phase 4 — Orderflow detectors ← NEXT
 
 | Detector | Priority | Data |
 |---|---|---|
