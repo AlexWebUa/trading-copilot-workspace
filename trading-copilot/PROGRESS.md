@@ -1,5 +1,5 @@
 # Trading Co-Pilot — Progress Report
-_Last updated: 2026-04-19_
+_Last updated: 2026-04-25_
 
 ---
 
@@ -15,7 +15,7 @@ Full design rationale and architecture: see [PLAN.md](PLAN.md).
 
 ---
 
-## Current state: Phase 1 + MCP + Phase 2 + Pine Script + Phase 3 (Trade Journal) complete ✅
+## Current state: Phase 1 + MCP + Phase 2 + Pine Script + Phase 3 (Trade Journal) + Phase 4 (Orderflow) complete ✅
 
 ### What's built and tested
 
@@ -50,6 +50,13 @@ Full design rationale and architecture: see [PLAN.md](PLAN.md).
 | `detect_compression` | LRLR narrowing range before expansion | `bars`, `squeeze_ratio`, `is_active`, `tightest_range_atr` |
 | `current_killzone` | Current Kyiv time + active killzone + OTT state | `active_killzone`, `in_ott_window`, `next_killzone` |
 
+**Detector library — Orderflow (Phase 4)** — 2 pure functions:
+
+| Detector | Concept | Key output fields |
+|---|---|---|
+| `detect_cumulative_delta` | Net buy pressure per bar (taker vol) | `session_delta`, `delta_trend`, `divergences`, `sweep_confirmation` |
+| `detect_volume_profile` | Price acceptance/rejection zones from OHLCV | `poc`, `vah`, `val`, `hvn_nodes`, `lvn_nodes`, `current_price_location` |
+
 **Visualization tool:**
 
 | Tool | Purpose | Output |
@@ -70,7 +77,7 @@ Teal/Red = FVG · Blue/Orange = OB · Lime/Maroon = IFVG · Aqua/Fuchsia = Break
 - [`copilot/llm/report.py`](copilot/llm/report.py) — saves reports to `~/.trading-copilot/reports/`
 
 **MCP server** (Claude Desktop / Cowork mode):
-- [`copilot/mcp_server.py`](copilot/mcp_server.py) — exposes **all 16 tools** (15 detectors + `generate_pine_script`) over stdio. Auto-discovers from the same `ToolRegistry` used by the CLI — no schema duplication.
+- [`copilot/mcp_server.py`](copilot/mcp_server.py) — exposes **all 18 tools** (17 detectors + `generate_pine_script`) over stdio. Auto-discovers from the same `ToolRegistry` used by the CLI — no schema duplication.
 - [`claude_desktop_config.json`](claude_desktop_config.json) — ready-to-merge Desktop registration config
 - [`run_mcp.bat`](run_mcp.bat) — standalone launcher with correct PYTHONPATH
 
@@ -79,7 +86,7 @@ Teal/Red = FVG · Blue/Orange = OB · Lime/Maroon = IFVG · Aqua/Fuchsia = Break
 - Commands: `analyze`, `switch <SYMBOL>`, `model <name>`, `verbose`, `history`, `read <N>`
 - Unrecognised input → treated as a follow-up query (chat mode)
 
-**Tests — 109/109 pass** (excluding 4 pre-existing `test_agent_loop` failures caused by a truncated `Glossary.md` in the workspace — unrelated to journal) (`python -m pytest tests/`):
+**Tests — 141/141 pass** (`python -m pytest tests/`):
 - `test_detectors_fvg.py` — 6 tests
 - `test_detectors_ms.py` — 6 tests
 - `test_detectors_bos.py` — 4 tests (including MSS detection)
@@ -94,6 +101,8 @@ Teal/Red = FVG · Blue/Orange = OB · Lime/Maroon = IFVG · Aqua/Fuchsia = Break
 - `test_detectors_sessions.py` — 8 tests *(Phase 2)*
 - `test_pine_script.py` — 11 tests *(Pine Script)*
 - `test_journal.py` — 33 tests *(Phase 3: Trade Journal)*
+- `test_detectors_cumulative_delta.py` — 15 tests *(Phase 4: Orderflow)*
+- `test_detectors_volume_profile.py` — 17 tests *(Phase 4: Orderflow)*
 
 **Journal module** (`copilot/journal/`):
 
@@ -158,17 +167,19 @@ New module: `copilot/journal/` (record, writer, reader). New REPL commands: `log
 
 This is the **foundation** for Phases 5–7 — no stats or backtest without clean journal data.
 
-### Phase 4 — Orderflow detectors ← NEXT
+### Phase 4 — Orderflow detectors ✅ DONE
 
-| Detector | Priority | Data |
+| Detector | Status | Data source |
 |---|---|---|
-| `detect_cumulative_delta` | ★ HIGH | Binance `aggTrades` API — feasible now |
-| `detect_volume_profile` | MEDIUM | Approximation from OHLCV (distribute bar volume over price range) |
+| `detect_cumulative_delta` | ✅ | Binance klines `taker_buy_base_vol` — exact candle-level delta, single API call |
+| `detect_volume_profile` | ✅ | OHLCV approximation: distribute bar volume uniformly over `[low, high]` buckets |
 | `detect_footprint_imbalances` | DEFERRED | Requires intra-candle L2 data, unavailable via public REST |
 
-CD is the highest-value addition: confirms or refutes sweep validity and MSS authenticity directly — core to SMC analysis.
+**`detect_cumulative_delta`** — returns `session_delta`, `delta_trend` (positive/negative/neutral), `divergences` (bearish/bullish price–CD divergence), `sweep_confirmation` (wick sweep + delta contradiction = manipulation signal). Uses `fetch_ohlcv_with_delta()` dispatched via `_DELTA_TOOLS` in `ToolRegistry`.
 
-### Phase 5 — Backtest engine (MEDIUM, after Phase 3 schema is frozen)
+**`detect_volume_profile`** — returns `poc`, `vah`, `val`, `hvn_nodes`, `lvn_nodes` (each with `price_mid/low/high`, `volume_pct`), `current_price_location`, `nearest_hvn/lvn_above/below` with `distance_atr`. Supports `session_bars` for intraday vs composite profiles.
+
+### Phase 5 — Backtest engine (MEDIUM, after Phase 3+4 schemas are frozen)
 
 `copilot/backtest/` — runs detectors over historical OHLC bar-by-bar (no look-ahead). Each triggered entry written to journal as `record_type="backtest"`. Enables live vs backtest comparison on the same metrics.
 
@@ -211,3 +222,6 @@ Each = one new `copilot/data/*.py` implementing `DataSource`. Detectors unchange
 | `detect_compression` returns `is_active` | LLM can immediately answer "is price coiling right now?" without post-processing |
 | `generate_pine_script` orchestrates all detectors | Single tool call gives the trader a paste-ready TradingView chart — no manual zone-drawing |
 | `_PASS_META_TOOLS` in registry | Pine Script needs symbol/tf for header labels — clean opt-in, doesn't touch other tool dispatch |
+| Binance klines for CD (not aggTrades) | `taker_buy_base_vol` in klines gives exact candle-level taker buy volume in a single request — aggTrades would need 200+ paginated calls for 24h BTC data |
+| `_DELTA_TOOLS` dispatch path in registry | Detectors needing `buy_vol/sell_vol/delta` opt into a separate fetch path — clean separation from plain OHLCV tools |
+| Volume Profile from OHLCV (not tick data) | Distributing bar volume uniformly over `[low, high]` is a practical approximation for liquid crypto — real VP requires L2 tick data unavailable via public REST |

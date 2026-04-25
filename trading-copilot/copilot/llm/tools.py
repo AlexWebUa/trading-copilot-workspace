@@ -21,13 +21,16 @@ from typing import Any, Callable
 import pandas as pd
 
 import copilot.detectors as _detectors_pkg
-from copilot.data.binance import BinanceSource, fetch_multi_tf
+from copilot.data.binance import BinanceSource, fetch_multi_tf, fetch_ohlcv_with_delta
 
 # Detectors that don't take a DataFrame (pure logic / time-based functions)
 _NO_DF_TOOLS = {"check_multi_tf_alignment", "current_killzone"}
 
 # Tools that need symbol/timeframe passed as kwargs (in addition to the df)
 _PASS_META_TOOLS = {"generate_pine_script"}
+
+# Tools that need OHLCV + delta columns (buy_vol/sell_vol/delta from klines)
+_DELTA_TOOLS = {"detect_cumulative_delta"}
 
 
 class ToolRegistry:
@@ -72,16 +75,27 @@ class ToolRegistry:
         tf = tool_input.get("timeframe", "1h")
         bars = tool_input.get("bars", 500)
 
-        try:
-            df = self._source.get_ohlc(symbol, tf, bars)
-        except Exception as e:
-            return {"error": f"Data fetch failed for {symbol}/{tf}: {e}"}
-
-        # Build kwargs: exclude symbol, timeframe, bars (those were for data fetch)
+        # Build kwargs: exclude data-fetch params
         kwargs = {
             k: v for k, v in tool_input.items()
             if k not in ("symbol", "timeframe", "bars")
         }
+
+        # Delta tools need buy_vol/sell_vol/delta columns from klines
+        if tool_name in _DELTA_TOOLS:
+            try:
+                df = fetch_ohlcv_with_delta(symbol, tf, bars)
+            except Exception as e:
+                return {"error": f"Delta data fetch failed for {symbol}/{tf}: {e}"}
+            try:
+                return fn(df, **kwargs)
+            except Exception as e:
+                return {"error": f"Detector {tool_name} raised: {e}"}
+
+        try:
+            df = self._source.get_ohlc(symbol, tf, bars)
+        except Exception as e:
+            return {"error": f"Data fetch failed for {symbol}/{tf}: {e}"}
 
         # Some tools (e.g. generate_pine_script) need symbol/tf for output labelling
         if tool_name in _PASS_META_TOOLS:
