@@ -131,20 +131,45 @@ python -m copilot --symbol ETHUSDT --verbose
 
 ## Roadmap
 
-### Phase 3 — More instruments (next)
-Adding data sources in order of ease:
-1. XAU/USD — metals-capable REST source
-2. EUR/USD — Dukascopy or OANDA demo
-3. GER40 + EU50
-4. NAS100 + SP500
+### Phase 3 — Trade Journal ★ **START HERE** (HIGH priority)
 
-Each = one new `copilot/data/*.py` implementing `DataSource`. Detectors unchanged.
+Append-only `journal.jsonl` at `~/.trading-copilot/journal/`. One `TradeRecord` per trade or backtest entry. Schema covers: symbol, account_type (demo/phase1/phase2/live), setup_name, tools_confirmed, direction, entry/exit/SL/TP prices, result, pnl_r, session, killzone, day_of_week, htf_bias, tags.
 
-### Phase 4 — Quality-of-life
-- Report archive browser in REPL (`history`, `read`)
-- Setup scorecard (took / skipped / invalidated → weekly stats)
+New module: `copilot/journal/` (record, writer, reader). New REPL commands: `log`, `trades`, `edit <id>`.
+
+This is the **foundation** for Phases 5–7 — no stats or backtest without clean journal data.
+
+### Phase 4 — Orderflow detectors
+
+| Detector | Priority | Data |
+|---|---|---|
+| `detect_cumulative_delta` | ★ HIGH | Binance `aggTrades` API — feasible now |
+| `detect_volume_profile` | MEDIUM | Approximation from OHLCV (distribute bar volume over price range) |
+| `detect_footprint_imbalances` | DEFERRED | Requires intra-candle L2 data, unavailable via public REST |
+
+CD is the highest-value addition: confirms or refutes sweep validity and MSS authenticity directly — core to SMC analysis.
+
+### Phase 5 — Backtest engine (MEDIUM, after Phase 3 schema is frozen)
+
+`copilot/backtest/` — runs detectors over historical OHLC bar-by-bar (no look-ahead). Each triggered entry written to journal as `record_type="backtest"`. Enables live vs backtest comparison on the same metrics.
+
+### Phase 6 — Statistics aggregation (MEDIUM, after ≥30 journal records)
+
+`copilot/stats/` — winrate, avg RR, profit factor, expectancy. Group by: setup, tool, session, day of week, account type, live vs backtest. **Tool-effectiveness ranking**: which tools actually shift winrate vs which are noise.
+
+### Phase 7 — Dashboard TUI (LOW-MEDIUM, after Phase 6)
+
+`python -m copilot dashboard` — rich terminal UI: equity curve, rolling winrate, session heatmap, top setups, tool leaderboard, worst conditions.
+
+### Phase 8 — Quality-of-life (ongoing, LOW)
 - Scheduled reports at killzone times (09:00 / 15:00 / 17:00 Kyiv)
 - Embeddings-based KB retrieval if keyword matching proves brittle
+- Report archive browser in REPL (`history`, `read`)
+
+### Phase 9 — More instruments (after crypto workflow is solid)
+
+Deferred until Phases 3–7 are stable. Scope: **XAU/USD → EUR/USD → GER40 + EU50 → NAS100 + SP500**.
+Each = one new `copilot/data/*.py` implementing `DataSource`. Detectors unchanged.
 
 ---
 

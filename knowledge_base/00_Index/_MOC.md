@@ -13,7 +13,7 @@ updated: 2026-04-25
 - [[01_Concepts]] — глобальные концепции, философия подхода, глобальные правила системы, контекст, Вайкофф, Static/Dynamic, Multi-TF
 - [[02_Market_Structure]] — структура рынка: BOS, CHoCH, MSS, Displacement, структурные точки, эффективная/неэффективная доставка цены
 - [[03_Tools]] — инструменты анализа графика: FVG, IFVG, BPR, Order Block, Breaker, Rejection Block, Mitigation Block, GAP, CBDR, SMT, Fibonacci/OTE, Liquidity
-- [[04_Market_Profile]] — Market Profile и VWAP: POC, Value Area, TPO, Initiative/Responsive, VWAP и деривативы
+- [[04_Market_Profile]] — Market Profile и VWAP: POC, Value Area, TPO, Initiative/Responsive, VWAP и деривативы; Orderflow: Volume Profile (HVN/LVN), Footprint Imbalances, Cumulative Delta
 - [[05_Sessions_Timings]] — сессии, макросы ICT, PO3/AMD, тайминги, правила пропуска дня
 - [[06_Bias_Templates]] — ICT Daily Bias, Intraday/Weekly Templates, Market Maker B/S Model, Open Types, Day Types, Квартальная теория
 - [[07_POI]] — Point of Interest: отбор, валидация, работа в POI

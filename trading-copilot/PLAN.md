@@ -457,24 +457,281 @@ Claude's final turn emits a **structured markdown report** driven by a prompt te
 
 **Milestone demo:** LLM autonomously identifies a Silver Bullet or STB/BTS structure end-to-end by chaining ≥4 detector calls; report cites specific detector output for each bullet.
 
-### Phase 3 — more instruments (2 days per family)
+### Phase 3 — Trade Journal ★ HIGH PRIORITY
+
+**Must land before Phases 5–7 have meaningful data. Can start immediately — no new data sources required.**
+
+Every trade and every backtest run is a `TradeRecord`. The schema is designed for filter + aggregation: winrate by setup, by tool, by session, by day of week, by account type.
+
+#### Storage
+
+`~/.trading-copilot/journal/journal.jsonl` — append-only, one JSON object per line. Easy to tail, grep, back up, and parse without migrations.
+
+#### Record schema
+
+```python
+# copilot/journal/record.py
+@dataclass
+class TradeRecord:
+    id: str                         # uuid4
+    record_type: str                # "trade" | "backtest"
+    ts_created: str                 # ISO 8601 UTC (when logged)
+    ts_entry: str | None            # ISO 8601 UTC
+    ts_exit: str | None             # ISO 8601 UTC
+    symbol: str                     # "BTCUSDT"
+    account_type: str               # "demo" | "phase1" | "phase2" | "live"
+    setup_name: str                 # "1h3m", "silver_bullet", "stb_bts", ...
+    tools_confirmed: list[str]      # ["fvg", "order_block", "volume_profile_hvn"]
+    tools_pending: list[str]        # checked but not confirmed
+    direction: str                  # "long" | "short"
+    entry_price: float | None
+    sl_price: float | None
+    tp_prices: list[float]
+    exit_price: float | None
+    result: str                     # "win" | "loss" | "be" | "pending" | "missed"
+    pnl_r: float | None             # R-multiples (positive = profit)
+    rr_planned: float | None        # planned R:R at entry
+    session: str                    # "london_open" | "ny_am" | "ny_pm" | "asia" | "ott"
+    killzone: str | None            # "09:00" | "15:00" | "17:00" Kyiv
+    day_of_week: int                # 0 = Monday
+    htf_bias: str                   # "bullish" | "bearish" | "ranging"
+    notes: str
+    report_path: str | None         # path to saved analysis report
+    tags: list[str]                 # free-form for ad-hoc filtering
+```
+
+#### File layout
+
+```
+copilot/
+└── journal/
+    ├── __init__.py
+    ├── record.py       # TradeRecord dataclass + to_dict / from_dict
+    ├── writer.py       # append_record(record) → journal.jsonl
+    ├── reader.py       # load_all() → list[TradeRecord]; filter_by(**kwargs)
+    └── cli.py          # REPL commands: `log`, `trades`, `edit <id>`
+```
+
+#### REPL commands added
+
+- `log` — interactive prompt to fill in a new trade record after a session.
+- `trades [--setup <name>] [--symbol <sym>] [--result win|loss] [--last N]` — list trades in table form.
+- `edit <id>` — reopen a pending record to fill in exit, result, notes.
+
+Backtest runs use the same schema with `record_type="backtest"`. `tags` includes `["backtest", "run_id:<uuid>"]` for grouping. This makes live vs backtest comparison on the same setup trivial.
+
+---
+
+### Phase 4 — Orderflow detectors ★ HIGH (CD) / MEDIUM (VP) / DEFERRED (Footprint)
+
+Data feasibility per tool on Binance public REST:
+
+| Tool | Data source | Priority |
+|---|---|---|
+| **Cumulative Delta** | `/fapi/v1/aggTrades` — buy/sell per trade; free, accurate | ★ HIGH |
+| **Volume Profile HVN/LVN** | OHLCV bars — distribute volume over [low, high] | MEDIUM |
+| **Footprint Imbalances** | Intra-candle bid/ask per price level — not in public REST | DEFERRED |
+
+#### `detect_cumulative_delta(df_ohlcv, df_agg, period="session") -> dict`
+
+New fetch: `copilot/data/binance.py` → `fetch_agg_trades(symbol, start_ms, end_ms)` → `pd.DataFrame[ts, price, qty, is_buyer_maker]`. Candle delta computed by binning trades into bar timestamps.
+
+Primary signals: (1) session net delta direction, (2) divergence (price new high, CD flat/falling), (3) sweep confirmation (sweep without CD support → manipulation confirmed).
+
+```python
+{
+  "period": "session",
+  "session_delta": -12430.5,
+  "delta_trend": "negative",          # "positive" | "negative" | "neutral"
+  "divergences": [
+    {
+      "type": "bearish",
+      "price_high": 67800.0,
+      "cd_at_high": -340.0,
+      "bar_ts": "2026-04-25T10:00:00Z",
+      "context": "price_new_high_cd_falling"
+    }
+  ],
+  "sweep_confirmation": {
+    "last_sweep_ts": "2026-04-25T09:45:00Z",
+    "sweep_side": "buyside",
+    "cd_at_sweep": -120.0,
+    "confirmed_manipulation": true
+  },
+  "bars": [
+    {"ts": "...", "delta": 430.5, "cumulative": -12430.5}
+  ]
+}
+```
+
+`TOOL_SCHEMA` description: "Use to confirm or dispute a liquidity sweep — if CD did not rise with a BSL sweep, the sweep is likely manipulation, not genuine demand."
+
+#### `detect_volume_profile(df, resolution_pct=0.1, session_bars=None) -> dict`
+
+Approximation: distribute each OHLCV bar's volume uniformly across `N = (high − low) / tick` price buckets. Aggregate over the period. Identify HVN (top 15% volume density) and LVN (bottom 15%). Tick size per symbol from `config.toml`.
+
+```python
+{
+  "poc": 67150.0,
+  "vah": 67480.0,
+  "val": 66820.0,
+  "hvn_nodes": [
+    {"price_mid": 67150.0, "price_low": 67100.0, "price_high": 67200.0,
+     "volume_pct": 18.4}
+  ],
+  "lvn_nodes": [
+    {"price_mid": 66980.0, "price_low": 66950.0, "price_high": 67010.0,
+     "volume_pct": 0.8}
+  ],
+  "current_price_location": "above_poc",
+  "nearest_hvn_above": {"price_mid": 67480.0, "distance_atr": 1.2},
+  "nearest_hvn_below": {"price_mid": 67150.0, "distance_atr": 0.3},
+  "nearest_lvn_on_path": {"price_mid": 66980.0, "distance_atr": 0.8, "side": "below"}
+}
+```
+
+KB integration: when `volume_profile_hvn` or `volume_profile_lvn` appears in `tools_confirmed`, `kb/selector.py` injects [`04_Market_Profile/Volume_Profile.md`](knowledge_base/04_Market_Profile/Volume_Profile.md) into the system prompt.
+
+#### `detect_footprint_imbalances` — Tier C (deferred)
+
+Requires intra-candle bid/ask volume per price level. Binance public REST does not expose this. Deferred until a L2/tick data source is wired in. The KB note is still injectable via selector when user mentions "footprint" — the LLM reasons about the concept without a live detector.
+
+---
+
+### Phase 5 — Backtest engine ★ MEDIUM (after Phase 3 schema is frozen)
+
+Run the detector library over historical OHLC data with simulated setup conditions. Results written to journal as `record_type="backtest"` entries, enabling live vs backtest comparison by the same metrics.
+
+#### Design
+
+```
+copilot/
+└── backtest/
+    ├── __init__.py
+    ├── engine.py       # BacktestEngine.run(symbol, tf, start, end, setup_rules)
+    ├── rules.py        # SetupRule: declarative detector confluence requirements
+    ├── simulate.py     # simulated_exit(entry, sl, tp, future_bars) → result, pnl_r
+    └── report.py       # summary per run; writes to journal
+```
+
+#### Look-ahead prevention
+
+Engine passes `df.iloc[:i+1]` to every detector call at bar index `i`. Entry triggered by close of bar `i+1`. Exit simulated on subsequent bars (first bar that touches TP or SL wick).
+
+#### SetupRule
+
+```python
+@dataclass
+class SetupRule:
+    name: str                        # "1h3m_long"
+    direction: str                   # "long" | "short"
+    conditions: list[Condition]      # detector name + field + assertion
+    entry_after: str                 # "bos_close" | "fvg_retrace_ce"
+    sl_logic: str                    # "below_swept_low" | "ob_lower"
+    tp_logic: str                    # "liquidity_above" | "next_hvn"
+    required_session: list[str] | None
+    required_killzone: list[str] | None
+```
+
+One `TradeRecord` per triggered entry; `tags` includes `["backtest", "run_id:<uuid>"]`.
+
+---
+
+### Phase 6 — Statistics aggregation ★ MEDIUM (meaningful after ≥30 journal records)
+
+```
+copilot/
+└── stats/
+    ├── __init__.py
+    ├── aggregator.py   # compute_stats(records, group_by=[...]) → StatsResult
+    └── cli.py          # REPL command: `stats [--group setup|tool|session|dow]`
+```
+
+#### Metrics
+
+| Metric | Formula |
+|---|---|
+| Winrate | wins / (wins + losses) |
+| Avg RR | mean(pnl_r) for completed trades |
+| Profit Factor | sum(pnl_r > 0) / abs(sum(pnl_r < 0)) |
+| Expectancy | winrate × avg_win_r − lossrate × avg_loss_r |
+
+Group-by dimensions: `setup_name`, individual tool in `tools_confirmed`, `session`, `day_of_week`, `account_type`, `htf_bias`, `record_type` (live vs backtest).
+
+**Tool-effectiveness ranking** (`stats --group tool`): lists each tool with conditional winrate (trades where tool was confirmed vs not confirmed). Tools with Δwinrate < 0 flagged as potentially redundant — directly answers the KB question "which tools actually improve outcome?"
+
+REPL examples:
+```
+> stats --group setup
+> stats --group tool --setup 1h3m
+> stats --compare live backtest --setup silver_bullet
+```
+
+---
+
+### Phase 7 — Dashboard ★ LOW-MEDIUM (terminal-first, no web UI)
+
+```
+copilot/
+└── dashboard/
+    ├── __init__.py
+    └── tui.py          # `python -m copilot dashboard` → rich TUI
+```
+
+| Panel | Content |
+|---|---|
+| Today | Today's trades, session P&L in R, active killzone countdown |
+| Equity curve | ASCII sparkline of cumulative R, last 30/90 days |
+| Winrate trend | Rolling 20-trade winrate, 50% benchmark line |
+| Heatmap | Winrate by day of week × session (colour-coded) |
+| Top setups | Sorted by profit factor (live / backtest / combined) |
+| Tool leaderboard | Tools ranked by Δwinrate contribution |
+| Worst conditions | Setup + session + DOW combos with PF < 1 |
+
+Implemented with `rich.table`, `rich.panel`. Launched via `python -m copilot dashboard` or `> dashboard` inside the REPL.
+
+---
+
+### Phase 8 — Quality-of-life (ongoing)
+
+- [ ] Scheduled reports at killzone times (09:00 / 15:00 / 17:00 Kyiv).
+- [ ] Embeddings-based KB retrieval if keyword matching proves brittle.
+- [ ] Report archive browser in REPL (`history`, `read`).
+
+---
+
+### Phase 9 — More instruments (after crypto workflow is solid)
+
+**Scope: forex, metals, indices — all deferred until Phases 3–7 are stable on crypto.**
 
 Add data sources in order of ease: **XAU/USD → EUR/USD → GER40 + EU50 → NAS100 + SP500**.
 - Each family = one new `data/*.py` implementing `DataSource`. Detectors unchanged.
 - Session/killzone tables extended per instrument class (FX, indices, metals).
 
-### Phase 4 — quality-of-life (ongoing)
+---
 
-- [ ] Report archive browser in REPL.
-- [ ] Setup scorecard (took / skipped / invalidated → weekly stats).
-- [ ] Scheduled reports at killzone times (09:00 / 15:00 / 17:00 Kyiv).
-- [ ] Embeddings-based KB retrieval if keyword matching proves brittle.
+### Priority summary
+
+| Phase | Feature | Priority | Prerequisite |
+|---|---|---|---|
+| 3 | Trade Journal | **HIGH** | — |
+| 4a | Cumulative Delta detector | **HIGH** | — |
+| 4b | Volume Profile HVN/LVN detector | MEDIUM | — |
+| 4c | Footprint Imbalances | DEFERRED | L2 data source |
+| 5 | Backtest engine | MEDIUM | Phase 3 schema |
+| 6 | Statistics aggregation | MEDIUM | Phase 3 ≥30 records |
+| 7 | Dashboard TUI | LOW-MEDIUM | Phase 6 |
+| 8 | QoL (scheduled reports, embeddings) | LOW | — |
+| 9 | More instruments (XAU, FX, indices) | LOW | Phases 3–7 stable |
+
+---
 
 ### Explicitly deferred
 
 - Trade execution, broker APIs, order placement.
-- Volume profile / VWAP / TPO detectors (need tick or L2 data).
-- Web/GUI frontend (REPL is sufficient and matches the user's discretionary workflow).
+- Footprint Imbalances (intra-candle L2 tick data unavailable via public REST).
+- VWAP / TPO detectors (tick data required; TPO approximation deferred).
+- Web/GUI frontend (REPL + TUI dashboard matches the user's discretionary workflow).
 
 ---
 

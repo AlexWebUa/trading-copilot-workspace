@@ -46,25 +46,28 @@ updated: 2026-04-18
 
 - **BC** 🟢 — Buying Climax. Кульминация покупок: покупки толпы поглощаются крупными игроками у вершины рынка — сигнал окончания восходящего движения (Phase A распределения). Также используется как маркер локальной верхней границы в Re-accumulation. → [[01_Concepts/Distribution_Phase]] · [[01_Concepts/Accumulation_Phase#Re-accumulation|Re-accumulation]]
 - **BE** 🟢 — Break-Even / паттерн «тест точки входа». В контексте **управления позицией**: цена после входа возвращается к POI (точке входа), а затем уходит к таргету. Часто формируется как Re-Sweep («дозаправка»). Правило: всегда ждать теста или ресвипа, не паниковать. → [[11_Trade_Management/Re-Sweep]]
-- **BB** (Breaker Block) 🟢 — OB, **полностью прошитый FVG**. Формируется, когда импульс в противоположную сторону оставляет имбаланс поверх исходной зоны; работает как POI с повышенной силой в сочетании с FVG (C.E. — 50 %). → [[03_Tools/Breaker_Block]]
+- **BB** (Breaker Block) 🟢 — OB, чья **защищаемая структурная точка (swing high/low) была пробита**: зона инвертирует роль (сопротивление → поддержка и наоборот). На графике пробой почти всегда сопровождается FVG — отсюда визуальный образ «прошитого OB», но определяющий критерий — именно снятие структурного уровня, а не наличие FVG. Работает как POI с повышенной силой, оптимально в связке с FVG C.E. (50 %). → [[03_Tools/Breaker_Block]]
 - **BIAS** 🟢 — направленность (ожидаемое направление движения) на конкретном таймфрейме. Определяется через анализ снятой/незакрытой ликвидности и позиции в MS Range (Premium/Discount). → [[06_Bias_Templates/ICT_Daily_Bias]]
 - **BISI** 🟢 — Buyside Imbalance / Sellside Inefficiency. При импульсном ап-муве формируется неэффективность на стороне продаж — бычий FVG, магнит для ребалансировки. → [[02_Market_Structure/Price_Delivery_Rebalancing]]
 - **BOS** 🟢 — Break of Structure. Пробой значимой структурной точки. **Swing (Context) BOS** — смена контекста; **Fractal/Minor (Entry) BOS** — триггер входа после манипуляции; **cBOS** — подтверждение продолжения тренда. → [[02_Market_Structure/BOS]]
-- **BPR** 🟢 — Balanced Price Range. Зона пересечения двух **равнонаправленных** FVG (V-образные движения); используется как POI и как Entry Model. Не путать с [[#IFVG|IFVG]]. → [[03_Tools/BPR]]
+- **BPR** 🟢 — Balanced Price Range. Зона пересечения двух **разнонаправленных** FVG (один бычий + один медвежий); формируется при V-образных движениях, когда встречный импульс оставляет свой FVG поверх первого. Используется как POI и как Entry Model. Не путать с [[#IFVG|IFVG]] (одиночный прошитый FVG без встречного). → [[03_Tools/BPR]]
 - **BSL** 🟢 — Buyside Liquidity. Стопы **шортовых** позиций (выше локальных хаев) и отложенные ордера на покупку; топливо для крупного игрока. → [[03_Tools/Liquidity]]
 - **BU/LPS** 🟢 — Back Up to Last Point of Support. Откат к зоне поддержки для финального теста перед началом восходящего тренда (Phase D аккумуляции). → [[01_Concepts/Accumulation_Phase]]
 - **BU/LPSY** 🟢 — Back Up to Last Point of Supply. Откат к зоне сопротивления после выхода из диапазона распределения — последний тест перед нисходящим трендом. → [[01_Concepts/Distribution_Phase]]
 
 ### C
 
+- **CD** 🟢 — Cumulative Delta. Нарастающая сумма дельты (Ask Volume − Bid Volume) за выбранный период. Растущий CD при растущей цене = здоровый тренд; дивергенция (цена обновляет экстремум, CD — нет) = скрытое давление противоположной стороны. Сбрасывается в начале каждой RTH-сессии. → [[04_Market_Profile/Cumulative_Delta]]
+- **CVD** 🟢 — Cumulative Volume Delta. Синоним [[#CD|CD]] в ряде платформ (Exocharts, Sierra Chart). → [[04_Market_Profile/Cumulative_Delta]]
 - **cBOS** 🟢 — Continuation / Confirmed BOS. Подтверждение **продолжения** текущей структуры: цена обновляет экстремумы в направлении тренда без его смены. → [[02_Market_Structure/BOS]]
 - **CBDR** 🟢 — Central Bank Dealers Range. Диапазон **2 PM – 8 PM NY** (23:00–03:00 Kiev); со стандартными отклонениями (ST DIV 1/2/3/4) определяет High/Low дня в D1 PO3. Идеальный Range ≤ 40 pips (опт. 20–30), типично до 3 отклонений, ≤ 2 — идеал. Рабочий ТФ — 15M; тянется по телам свечей. → [[03_Tools/CBDR]]
 - **C.E.** 🟢 — Consequent Encroachment. 50% зоны FVG (середина неэффективности); ключевой внутренний уровень реакции в ребалансировке. → [[02_Market_Structure/Price_Delivery_Rebalancing]]
-- **CHoCH** 🔴 — Change of Character. Смена характера движения — первый противоположный перелом структуры, сигнализирующий о потенциальной смене тренда. Концептуально близка к [[#MSS|MSS]] (в исходниках системы используется термин MSS, CHoCH — отраслевой синоним). → [[02_Market_Structure/Market_Structure_Shift]]
+- **CHoCH** 🟢 — Change of Character. В широком трейдинговом сообществе (SMC/ICT): **первый** пробой структуры **против** действующего тренда — сигнал потенциальной смены направления. Отличается от BOS тем, что BOS продолжает тренд (обновление хая в бычьей структуре), тогда как CHoCH ломает его (пробой последнего HL в бычьей структуре вниз). В данной системе вместо CHoCH используется термин **[[#MSS|MSS]]** (Market Structure Shift) — понятия идентичны по сути. Различие лишь терминологическое: авторы системы работают с MSS и Displacement как с триггером, тогда как в SMC-сообществе тот же момент называется CHoCH. → [[02_Market_Structure/Market_Structure_Shift]]
 - **Compression** 🟢 — LRLR (Low Resistance Liquidity Run): сжатый ценовой диапазон с «билдингом ликвидности» по одну сторону; после снятия локальных целей становится причиной **агрессивного обратного движения** через всю компрессию. Классический ТА воспринимает как уровень — Smart Money как скопление ликвидности. Используется как цель для сделки. → [[03_Tools/Compression]]
 
 ### D
 
+- **Delta** 🟢 — разница между объёмом агрессивных покупок (Ask Volume) и продаж (Bid Volume) за свечу или период: Delta = Ask − Bid. Положительная дельта → доминирование покупателей; отрицательная → продавцов. Базовый элемент Footprint-анализа и Cumulative Delta. → [[04_Market_Profile/Footprint_Imbalances]] · [[04_Market_Profile/Cumulative_Delta]]
 - **DO** 🟢 — Daily Open. Цена на начало новых суток (00:00 UTC или локальное время). Используется как ориентир манипуляции в Daily PO3: бычий день → провал ниже DO (London Judas), медвежий день → выпад выше DO. → [[05_Sessions_Timings/PO3_AMD]]
 - **Displacement** 🟢 — импульсное агрессивное движение в момент структурного сдвига, оставляющее FVG. Свечи с большими телами, короткими тенями и разрывами между ними. Обязательный атрибут валидного MSS. → [[02_Market_Structure/Market_Structure_Shift]]
 - **Distribution** 🟢 — фаза фиксации прибыли: крупный капитал сбрасывает актив розничным участникам на максимумах. Зеркальное отражение аккумуляции; структура A → B → C (UTAD) → D (LPSY, SOW) → E. → [[01_Concepts/Distribution_Phase]]
@@ -78,6 +81,7 @@ updated: 2026-04-18
 ### F
 
 - **Failure Swing** 🟢 — попытка обновить предыдущий экстремум, которая не удаётся; часто предшествует MSS (резкому импульсу в противоположную сторону). → [[02_Market_Structure/Market_Structure_Shift]]
+- **Footprint** 🟢 — кластерный (Footprint) график: для каждого ценового уровня внутри свечи отображается объём на Bid и Ask раздельно. Позволяет видеть кто был агрессором — покупатели (Market Buy = Ask Volume) или продавцы (Market Sell = Bid Volume). Ключевые паттерны: [[#Imbalance (Orderflow)|Orderflow Imbalance]], [[#Stacked Imbalances|Stacked Imbalances]], Absorption, Exhaustion. Требует L2/тиковых данных; рекомендуются платформы Exocharts, Sierra Chart, Bookmap. → [[04_Market_Profile/Footprint_Imbalances]]
 - **FTA** 🟢 — First Trouble Area. Первая точка (POI, ликвидность, уровень), от которой цена может дать реакцию и потенциально сменить тренд — ближайшее препятствие на пути к таргету. При достижении FTA нужно убедиться, что это реакция на уровень с продолжением HTF-движения, а не разворот контекста. → [[07_POI/Context_BIAS_POI]]
 - **FullFill** 🟢 — 100%-ное перекрытие FVG; синоним полной ребалансировки (re-balance). → [[02_Market_Structure/Price_Delivery_Rebalancing]]
 - **FVG** 🟢 — Fair Value Gap. Трёхсвечная формация имбаланса (тень средней свечи не перекрыта соседними). Глубина теста: [[#IOFED|IOFED]] (≥ 1 %) → [[#C.E.|C.E.]] (50 %) → [[#FullFill|FullFill]] (100 %). Применяется как POI на HTF и как модель входа на LTF; синхронизируется по ТФ-парам (4H+1H, 4H+30M, 1H+15M, 15M+5M). → [[03_Tools/FVG]]
@@ -87,6 +91,10 @@ updated: 2026-04-18
 
 - **GAP** 🟢 — Ценовой разрыв между двумя свечами (открытие после выходных / крупного перерыва). Разметка — инструментом Фибоначчи от экстремума первой свечи до начала следующей. Используется как POI на HTF и точечно как модель входа на LTF. → [[03_Tools/GAP]]
 - **Golden Rain** 🔴 — Stub: исходная заметка содержит только структуру (Intro/Base/Context/Entry models/TP/RM) без наполнения; backtest Jan–Jun 2022 недоступен. → [[03_Tools/Golden_Rain]] · [[_Ambiguities]]
+
+### H
+
+- **HVN** 🟢 — High Volume Node. Уровень/зона в Volume Profile с аномально высоким объёмом — признак принятия цены (acceptance). Цена замедляется и ротирует вблизи HVN; выступает поддержкой/сопротивлением. TPO-аналог: зона с широким профилем и большим количеством TPO-блоков. → [[04_Market_Profile/Volume_Profile]]
 
 ### I
 
@@ -114,6 +122,7 @@ updated: 2026-04-18
 - **LPS** 🟢 — Last Point of Support. Последняя точка поддержки внутри диапазона аккумуляции (Phase D); точка, после которой начинается движение вверх. LPS может быть несколько. → [[01_Concepts/Accumulation_Phase]]
 - **LPSY** 🟢 — Last Point of Supply. Последняя точка предложения в диапазоне распределения (Phase D); может быть несколько; предшествует нисходящему импульсу. → [[01_Concepts/Distribution_Phase]]
 - **LTH / LTL** 🟢 — Long-Term High / Low. Долгосрочные свинги (D, W, M), задающие контекст рынка (bias) и основные зоны ликвидности. Опорный уровень для Advanced Market Structure. → [[02_Market_Structure/Advanced_Market_Structure]]
+- **LVN** 🟢 — Low Volume Node. Уровень/зона в Volume Profile с аномально низким объёмом — признак отторжения цены (rejection). Рынок прошёл этот уровень быстро, не оставив сделок. Цена движется через LVN без сопротивления — «дыра» в профиле, ускоряющая движение. TPO-аналог: [[#Single Prints|Single Prints]]. → [[04_Market_Profile/Volume_Profile]]
 
 ### M
 
@@ -204,6 +213,7 @@ updated: 2026-04-18
 
 - **VA** 🟢 — Value Area. Область ценового консенсуса: ≈68–70% всех TPO/объёма. Внутри VA — баланс и ротация. Выход за VA = потенциальный дисбаланс. Сценарии: VA Breakout (инициатива), Move inside VA (Responsive), Move outside VA (принятие или Failed Auction). → [[04_Market_Profile/Value_Area]]
 - **VAH / VAL** 🟢 — Value Area High / Low. Верхняя/нижняя граница VA. Ключевые уровни для сценариев Initiative и Responsive: VAH — зона Responsive Selling / Initiative Buying, VAL — зона Responsive Buying / Initiative Selling. → [[04_Market_Profile/Value_Area]]
+- **VP** 🟢 — Volume Profile. Горизонтальная гистограмма распределения объёма по ценовым уровням за выбранный период. Типы: Session VP, Fixed Range VP, Visible Range VP, Composite VP. Ключевые элементы: POC (максимальный объём), Value Area (70% объёма), HVN (зона принятия), LVN (зона отторжения). В отличие от TPO-профиля измеряет не время, а реальный денежный поток. → [[04_Market_Profile/Volume_Profile]]
 - **VWAP** 🟢 — Volume Weighted Average Price. Средневзвешенная по объёму цена — институциональный бенчмарк исполнения. Типы: Session / Weekly / Monthly / Anchored. Элементы: Mean (±0σ), ±1σ (68% активности), ±2σ (95%). Воспринимать как зону, не линию. Применяется: динамический уровень, TP (mean-reversion к Midpoint), фильтрация сделок у OAR/IDAR. → [[04_Market_Profile/VWAP]]
 
 ### W
@@ -269,9 +279,4 @@ updated: 2026-04-18
 - **2026-04-18**: после Group 8 (Bias / Templates ICT) апгрейднуты до 🟢 — BIAS, DWMY, MMBM. Ссылки обновлены на созданные заметки [[06_Bias_Templates/ICT_Daily_Bias]], [[06_Bias_Templates/DWMY_Opens]], [[06_Bias_Templates/Market_Maker_Model]].
 - **2026-04-18**: после Group 9 (POI) апгрейднуты до 🟢 — DP, IOF, POI. Созданы заметки [[07_POI/POI]], [[07_POI/IOF]], [[07_POI/Decision_Point_DP]], [[07_POI/Work_in_POI]].
 - **2026-04-18**: после Group 10 (Entry Models) апгрейднуты до 🟢 — Judas Swing, Silver Bullet. Созданы заметки [[08_Entry_Models/Entry_Models]], [[08_Entry_Models/Entry_Models_Practical]], [[08_Entry_Models/ICT_Judas_Swing]], [[08_Entry_Models/ICT_Silver_Bullet]].
-- **2026-04-18**: после Group 11 (Setups) апгрейднут до 🟢 — STBBTS. Созданы заметки [[09_Setups/NYSE_Open_Setups]], [[09_Setups/VWAP_Strategies]], [[09_Setups/STB_BTS]], [[09_Setups/DT15_DT16]].
-- **2026-04-18**: после Group 12 (Order Flow / Trade Management) апгрейднуты до 🟢 — BE, Momentum, OF, Re-Sweep, RTGS. Добавлены новые термины 🟢 — Search Hunt (SH). Созданы заметки [[11_Trade_Management/Order_Flow]], [[11_Trade_Management/Momentum]], [[11_Trade_Management/Re-Sweep]], [[11_Trade_Management/Reverses]], [[11_Trade_Management/Theory_of_RTGS]].
-- **2026-04-18**: после Group 13 (Проекции / STDV) апгрейднуты до 🟢 — OAR, PD, STDV. Созданы заметки [[04_Market_Profile/Standard_Deviation_STDV]], [[04_Market_Profile/OAR_IDAR]].
-- **2026-04-18**: после Group 14 (Multi-TF / Static vs Dynamic) апгрейднут до 🟢 — Статический/Динамический. Добавлен Multi-TF. Созданы заметки [[01_Concepts/Multi_TF_Analysis]], [[01_Concepts/Static_vs_Dynamic]].
-- **2026-04-18**: после Group 15 (Инструменты рынка) созданы заметки [[10_Instruments/USA_Indices]] (NASDAQ/ES/YM/RTY), [[10_Instruments/DAX_Strategy]]. **ВСЕ 138 ИСХОДНЫХ ФАЙЛОВ ПРОАНАЛИЗИРОВАНЫ** (9 skipped, 76 merged, 53 отдельных заметки).
-- **2026-04-19**: после группы raw_failed (8 файлов, перемещены в raw_notion). Апгрейднуты до 🟢 — FTA, IDM/Inducement, TGIF, SP. Добавлены новые термины 🟢 — SSMT, True Open. Созданы заметки [[03_Tools/Inducement]], [[09_Setups/TGIF_Setup]], [[07_POI/Context_BIAS_POI]], [[06_Bias_Templates/Quarterly_Theory]] (stub→defined), [[09_Setups/Isqra_Strategy]]. Обновлены [[06_Bias_Templates/ICT_Intraday_Templates]] (6 шаблонов, stub→defined), [[01_Concepts/Static_vs_Dynamic]] (раздел «Как создать Static Setup»). Также: [[09_Setups/1h3m_by_WinstonFX]] (stub→defined, полный контент), [[06_Bias_Templates/Day_Types]] (добавлена intro-секция из Notion_6). DT16 и Dark_Trader_Index_Sessions_Indicator — только графика, ре-экспорт не нужен, KB-заметки полные. **ВСЕ ФАЙЛЫ ОБРАБОТАНЫ** (all raw_notion + все raw_failed).
+- **2026-04-18**: после Group 11 (Setups) апгрейднут до 🟢 — STBBTS. Созданы заме�
