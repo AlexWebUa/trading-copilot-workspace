@@ -30,6 +30,29 @@ def normalize_binance(raw: list[list]) -> pd.DataFrame:
     return df[OHLCV_COLUMNS]
 
 
+DELTA_COLUMNS = ["buy_vol", "sell_vol", "delta"]
+
+
+def normalize_binance_with_delta(raw: list[list]) -> pd.DataFrame:
+    """Like normalize_binance but also includes buy_vol, sell_vol, delta columns.
+
+    buy_vol  = taker_buy_base_vol  (aggressive market buys, Ask side)
+    sell_vol = volume - buy_vol    (aggressive market sells, Bid side)
+    delta    = buy_vol - sell_vol  (positive = buyers dominated)
+
+    These come from the klines response directly — no approximation needed.
+    """
+    df = pd.DataFrame(raw, columns=_BINANCE_COLUMNS)
+    for col in OHLCV_COLUMNS + ["taker_buy_base_vol"]:
+        df[col] = df[col].astype("float64")
+    df["ts"] = pd.to_datetime(df["open_time"].astype("int64"), unit="ms", utc=True)
+    df = df.drop(columns=["open_time"]).set_index("ts")
+    df["buy_vol"] = df["taker_buy_base_vol"]
+    df["sell_vol"] = df["volume"] - df["buy_vol"]
+    df["delta"] = df["buy_vol"] - df["sell_vol"]
+    return df[OHLCV_COLUMNS + DELTA_COLUMNS]
+
+
 def validate(df: pd.DataFrame) -> None:
     """Raise if df doesn't match the canonical schema."""
     missing = [c for c in OHLCV_COLUMNS if c not in df.columns]

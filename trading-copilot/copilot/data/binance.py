@@ -14,7 +14,7 @@ import pandas as pd
 
 from copilot.data.base import assert_valid_tf
 from copilot.data.cache import OHLCCache
-from copilot.data.normalize import normalize_binance
+from copilot.data.normalize import normalize_binance, normalize_binance_with_delta
 
 # USD-M perpetual futures — primary
 _FUTURES_URL = "https://fapi.binance.com"
@@ -74,6 +74,35 @@ class BinanceSource:
             resp = client.get(f"{self._base_url}{self._endpoint}", params=params)
             resp.raise_for_status()
         return normalize_binance(resp.json())
+
+
+def fetch_ohlcv_with_delta(
+    symbol: str,
+    tf: str,
+    bars: int = 200,
+    market: str = "futures",
+) -> pd.DataFrame:
+    """Fetch klines and return OHLCV + per-bar delta columns.
+
+    Uses taker_buy_base_vol from the klines response — exact candle-level
+    delta from Binance, no approximation or tick-data required.
+
+    Returned columns: open, high, low, close, volume, buy_vol, sell_vol, delta
+    """
+    assert_valid_tf(tf)
+    symbol = symbol.upper()
+    interval = _TF_MAP[tf]
+
+    if market == "futures":
+        base_url, endpoint = _FUTURES_URL, _FUTURES_ENDPOINT
+    else:
+        base_url, endpoint = _SPOT_URL, _SPOT_ENDPOINT
+
+    params = {"symbol": symbol, "interval": interval, "limit": min(bars, 1500)}
+    with httpx.Client(timeout=10.0) as client:
+        resp = client.get(f"{base_url}{endpoint}", params=params)
+        resp.raise_for_status()
+    return normalize_binance_with_delta(resp.json())
 
 
 def fetch_multi_tf(
