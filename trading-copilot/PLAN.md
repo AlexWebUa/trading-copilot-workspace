@@ -637,7 +637,7 @@ One `TradeRecord` per triggered entry; `tags` includes `["backtest", "run_id:<uu
 
 ---
 
-### Phase 6 — Statistics aggregation ★ MEDIUM (meaningful after ≥30 journal records)
+### Phase 6 — Statistics aggregation ✅ DONE
 
 ```
 copilot/
@@ -669,7 +669,7 @@ REPL examples:
 
 ---
 
-### Phase 7 — Dashboard ★ LOW-MEDIUM (terminal-first, no web UI)
+### Phase 7 — Dashboard ★ LOW-MEDIUM (terminal-first, no web UI) ← NEXT
 
 ```
 copilot/
@@ -712,17 +712,18 @@ Add data sources in order of ease: **XAU/USD → EUR/USD → GER40 + EU50 → NA
 
 ### Priority summary
 
-| Phase | Feature | Priority | Prerequisite |
+| Phase | Feature | Priority | Status |
 |---|---|---|---|
-| 3 | Trade Journal | **HIGH** | — |
-| 4a | Cumulative Delta detector | **HIGH** | — |
-| 4b | Volume Profile HVN/LVN detector | MEDIUM | — |
-| 4c | Footprint Imbalances | DEFERRED | L2 data source |
-| 5 | Backtest engine | MEDIUM | Phase 3 schema |
-| 6 | Statistics aggregation | MEDIUM | Phase 3 ≥30 records |
-| 7 | Dashboard TUI | LOW-MEDIUM | Phase 6 |
-| 8 | QoL (scheduled reports, embeddings) | LOW | — |
-| 9 | More instruments (XAU, FX, indices) | LOW | Phases 3–7 stable |
+| 3 | Trade Journal | **HIGH** | ✅ DONE (SQLite WAL) |
+| 4a | Cumulative Delta detector | **HIGH** | ✅ DONE |
+| 4b | Volume Profile HVN/LVN detector | MEDIUM | ✅ DONE |
+| 4c | Footprint Imbalances | DEFERRED | L2 data unavailable |
+| 5 | Backtest engine | MEDIUM | ✅ DONE (+ walk-forward split) |
+| 6 | Statistics aggregation | MEDIUM | ✅ DONE |
+| — | Cross-cutting improvements (9 items) | MEDIUM | ✅ DONE |
+| 7 | Dashboard TUI | LOW-MEDIUM | ← **NEXT** |
+| 8 | QoL (scheduled reports, embeddings) | LOW | pending |
+| 9 | More instruments (XAU, FX, indices) | LOW | pending |
 
 ---
 
