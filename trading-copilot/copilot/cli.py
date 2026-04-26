@@ -23,6 +23,16 @@ REPL commands:
              [--tf TF] [--bars N]
              [--start DATE] [--end DATE]
              [--no-write] [--list-rules]
+    compare --rules A,B,C [--symbol S]    — compare multiple rules on same data
+            --group A|B|C                   group A=VP, B=CD, C=combined
+            --all                           all builtin + orderflow rules
+            --ablate RULE                   condition importance analysis
+            --wf                            walk-forward train/test split
+    stats [--group setup|tool|session]    — performance stats from journal
+          [--dow|account|record_type]
+          [--type trade|backtest]
+          [--setup NAME] [--compare A B]
+          [--tool-effectiveness]
     help                                   — show this help
     exit / quit                            — exit the REPL
 """
@@ -273,11 +283,25 @@ def _do_edit(rest: str) -> None:
     print(f"  Updated {rec.id[:8]}.")
 
 
+def _journal_path() -> Path | None:
+    """Return the default journal path (same as used in log/trades commands)."""
+    from pathlib import Path
+    p = Path.home() / ".copilot" / "journal.jsonl"
+    return p if p.exists() else None
+
+
+def _all_rules() -> dict:
+    """Return all available rules: builtin + orderflow."""
+    from copilot.backtest.rules import BUILTIN_RULES
+    from copilot.backtest.rules_orderflow import ORDERFLOW_RULES
+    return {**BUILTIN_RULES, **ORDERFLOW_RULES}
+
+
 def _do_backtest(rest: str, default_symbol: str) -> None:
-    from copilot.backtest.rules import BUILTIN_RULES, SetupRule
     from copilot.backtest.engine import BacktestEngine
     from copilot.backtest.report import print_summary
     from copilot.data.binance import BinanceSource
+    from copilot.backtest.rules import SetupRule
     import json
 
     parser = argparse.ArgumentParser(add_help=False, exit_on_error=False)
@@ -296,11 +320,22 @@ def _do_backtest(rest: str, default_symbol: str) -> None:
         print("  Usage: backtest --rule RULE [--symbol S] [--tf TF] [--bars N] [--start DATE] [--end DATE] [--no-write]")
         return
 
+    all_rules = _all_rules()
+
     if args.list_rules:
-        print("  Built-in rules:")
+        from copilot.backtest.rules_orderflow import ORDERFLOW_GROUPS
+        print("  Built-in SMC rules:")
+        from copilot.backtest.rules import BUILTIN_RULES
         for name, rule in BUILTIN_RULES.items():
             n_cond = len(rule.conditions)
-            print(f"    {name:<20} {rule.direction:<5}  {n_cond} conditions  sl={rule.sl_logic}  tp={rule.tp_logic}")
+            print(f"    {name:<30} {rule.direction:<5}  {n_cond} conditions  sl={rule.sl_logic}  tp={rule.tp_logic}")
+        print("\n  Orderflow rules (Phase 6):")
+        for grp, names in ORDERFLOW_GROUPS.items():
+            print(f"  Group {grp}:")
+            for name in names:
+                rule = all_rules[name]
+                n_cond = len(rule.conditions)
+                print(f"    {name:<30} {rule.direction:<5}  {n_cond} conditions  sl={rule.sl_logic}  tp={rule.tp_logic}")
         return
 
     if not args.rule:
@@ -308,8 +343,8 @@ def _do_backtest(rest: str, default_symbol: str) -> None:
         return
 
     # Resolve rule
-    if args.rule in BUILTIN_RULES:
-        rule = BUILTIN_RULES[args.rule]
+    if args.rule in all_rules:
+        rule = all_rules[args.rule]
     elif args.rule.endswith(".json"):
         try:
             rule = SetupRule.from_dict(json.loads(Path(args.rule).read_text(encoding="utf-8")))
@@ -317,8 +352,8 @@ def _do_backtest(rest: str, default_symbol: str) -> None:
             print(f"  Failed to load rule from {args.rule}: {e}")
             return
     else:
-        names = ", ".join(BUILTIN_RULES.keys())
-        print(f"  Unknown rule '{args.rule}'. Built-ins: {names}")
+        names = ", ".join(all_rules.keys())
+        print(f"  Unknown rule '{args.rule}'. Known rules: {names}")
         print("  Or provide a path to a .json rule file.")
         return
 
@@ -341,6 +376,112 @@ def _do_backtest(rest: str, default_symbol: str) -> None:
         print_summary(summary)
     except Exception as e:
         print(f"  Backtest error: {e}")
+
+
+def _do_compare(rest: str, default_symbol: str) -> None:
+    """
+    compare --rules fvg_ob_long,ob_in_hvn_long   # named rules
+    compare --group A                             # Group A rules
+    compare --group B
+    compare --group C
+    compare --all                                 # all rules
+    compare --all --wf                            # + walk-forward
+    compare --ablate ob_in_hvn_long               # condition ablation
+    compare --all --symbol ETHUSDT --tf 4h --bars 2000
+    """
+    from copilot.backtest.compare import (
+        compare_rules, walk_forward, ablate_conditions,
+        print_comparison, print_ablation,
+    )
+    from copilot.backtest.rules_orderflow import ORDERFLOW_GROUPS, ORDERFLOW_RULES
+    from copilot.backtest.rules import BUILTIN_RULES
+
+    parser = argparse.ArgumentParser(prog="compare", add_help=False, exit_on_error=False)
+    parser.add_argument("--rules", default=None, help="Comma-separated rule names")
+    parser.add_argument("--group", default=None, choices=["A", "B", "C"],
+                        help="Run all rules in group A, B, or C")
+    parser.add_argument("--all", action="store_true", dest="all_rules",
+                        help="Run all built-in + orderflow rules")
+    parser.add_argument("--ablate", default=None, metavar="RULE",
+                        help="Ablation analysis: run rule with each condition removed")
+    parser.add_argument("--wf", action="store_true",
+                        help="Walk-forward train/test split per rule")
+    parser.add_argument("--symbol", default=default_symbol)
+    parser.add_argument("--tf", default="1h")
+    parser.add_argument("--bars", type=int, default=2000)
+    parser.add_argument("--no-write", action="store_true", dest="no_write")
+    parser.add_argument("--min-trades", type=int, default=20, dest="min_trades")
+    parser.add_argument("-h", "--help", action="store_true")
+
+    try:
+        args = parser.parse_args(shlex.split(rest) if rest.strip() else [])
+    except (SystemExit, Exception) as e:
+        print(f"compare: {e}")
+        return
+
+    if args.help:
+        parser.print_help()
+        return
+
+    all_known = _all_rules()
+    symbol = args.symbol.upper()
+
+    # Ablation mode
+    if args.ablate:
+        if args.ablate not in all_known:
+            print(f"  Unknown rule '{args.ablate}'. Use backtest --list-rules to see options.")
+            return
+        rule = all_known[args.ablate]
+        print(f"\n  Ablation: {rule.name} · {symbol} · {args.tf} · {args.bars} bars\n")
+        rows = ablate_conditions(rule, symbol, args.tf, args.bars)
+        print_ablation(rows, rule.name)
+        return
+
+    # Resolve rule list
+    if args.all_rules:
+        rules = list(all_known.values())
+        title = f"All rules — {symbol} {args.tf} {args.bars} bars"
+    elif args.group:
+        names = ORDERFLOW_GROUPS.get(args.group, [])
+        rules = [ORDERFLOW_RULES[n] for n in names if n in ORDERFLOW_RULES]
+        title = f"Group {args.group} rules — {symbol} {args.tf} {args.bars} bars"
+    elif args.rules:
+        names = [n.strip() for n in args.rules.split(",") if n.strip()]
+        missing = [n for n in names if n not in all_known]
+        if missing:
+            print(f"  Unknown rules: {', '.join(missing)}")
+            return
+        rules = [all_known[n] for n in names]
+        title = f"Custom selection — {symbol} {args.tf} {args.bars} bars"
+    else:
+        print("  Specify --rules NAMES, --group A|B|C, or --all")
+        return
+
+    if not rules:
+        print("  No rules resolved from selection.")
+        return
+
+    print(f"\n  Comparing {len(rules)} rules on {symbol} {args.tf} …\n")
+    rows = compare_rules(
+        rules=rules,
+        symbol=symbol,
+        tf=args.tf,
+        bars=args.bars,
+        min_trades=args.min_trades,
+        write_journal=not args.no_write,
+    )
+    print_comparison(rows, title=title)
+
+    if args.wf:
+        print("\n  Walk-Forward validation (75% train / 25% test):\n")
+        for rule in rules:
+            train_s, test_s = walk_forward(rule, symbol, args.tf, args.bars)
+            train_row = f"  train PF={train_s.profit_factor:.2f}  WR={train_s.winrate*100:.1f}%  N={train_s.total_trades}"
+            test_row  = f"  test  PF={test_s.profit_factor:.2f}  WR={test_s.winrate*100:.1f}%  N={test_s.total_trades}"
+            print(f"  {rule.name}")
+            print(train_row)
+            print(test_row)
+            print()
 
 
 def _check_api_key() -> None:
@@ -476,6 +617,13 @@ def main() -> None:
 
         elif cmd in ("backtest", "bt"):
             _do_backtest(rest, session.symbol)
+
+        elif cmd in ("compare", "cmp"):
+            _do_compare(rest, session.symbol)
+
+        elif cmd == "stats":
+            from copilot.stats.cli import _do_stats
+            _do_stats(rest, journal_path=_journal_path())
 
         elif cmd == "analyze":
             query = rest or "Perform a full multi-timeframe market analysis."
