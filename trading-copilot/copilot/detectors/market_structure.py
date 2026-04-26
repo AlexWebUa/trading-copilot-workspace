@@ -51,7 +51,7 @@ def _find_swings(df: pd.DataFrame, lookback: int) -> list[dict]:
         window_l = lows[i - lookback : i + lookback + 1]
         if highs[i] == window_h.max():
             swings.append({"type": "high", "price": float(highs[i]), "ts": tss[i]})
-        elif lows[i] == window_l.min():
+        if lows[i] == window_l.min():
             swings.append({"type": "low", "price": float(lows[i]), "ts": tss[i]})
 
     swings.sort(key=lambda x: x["ts"])

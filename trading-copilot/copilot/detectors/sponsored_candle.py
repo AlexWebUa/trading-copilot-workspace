@@ -97,9 +97,9 @@ def detect_sponsored_candle(
             if not sweep_found:
                 continue  # No sponsoring sweep → not a sponsored candle
 
-            future_closes = closes[i + 2:]
+            future_lows = lows[i + 2:]
             midpoint = (ob_high + ob_low) / 2
-            is_mitigated = len(future_closes) > 0 and bool((future_closes <= midpoint).any())
+            is_mitigated = len(future_lows) > 0 and bool((future_lows <= midpoint).any())
 
             sponsored.append({
                 "ob_type": "bullish",
@@ -128,9 +128,9 @@ def detect_sponsored_candle(
             if not sweep_found:
                 continue
 
-            future_closes = closes[i + 2:]
+            future_highs = highs[i + 2:]
             midpoint = (ob_high + ob_low) / 2
-            is_mitigated = len(future_closes) > 0 and bool((future_closes >= midpoint).any())
+            is_mitigated = len(future_highs) > 0 and bool((future_highs >= midpoint).any())
 
             sponsored.append({
                 "ob_type": "bearish",
