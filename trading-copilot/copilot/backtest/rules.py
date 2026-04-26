@@ -284,10 +284,10 @@ def evaluate_conditions(
 # Detector registry (auto-discovered, excludes delta/no-df tools)
 # ---------------------------------------------------------------------------
 
-def build_detector_registry() -> dict[str, Any]:
+def build_detector_registry(include_delta: bool = False) -> dict[str, Any]:
     """
     Auto-discover all detector functions from copilot.detectors.*.
-    Excludes delta-only tools and no-df tools.
+    Excludes no-df tools always. Excludes delta-only tools unless include_delta=True.
     Returns {function_name: callable}.
     """
     registry: dict[str, Any] = {}
@@ -297,8 +297,11 @@ def build_detector_registry() -> dict[str, Any]:
             if (attr.startswith("detect_") or attr.startswith("check_")) and callable(
                 getattr(mod, attr)
             ):
-                if attr not in _DELTA_ONLY and attr not in _NO_DF:
-                    registry[attr] = getattr(mod, attr)
+                if attr in _NO_DF:
+                    continue
+                if attr in _DELTA_ONLY and not include_delta:
+                    continue
+                registry[attr] = getattr(mod, attr)
     return registry
 
 

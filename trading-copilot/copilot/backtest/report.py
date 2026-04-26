@@ -145,7 +145,7 @@ def print_summary(summary: "BacktestSummary") -> None:  # noqa: F821
     if summary.total_trades > 0:
         print(sep)
         if summary.total_trades > 0:
-            from copilot.journal.writer import _DEFAULT_PATH
+            from copilot.journal.writer import default_journal_path
             print(
                 f"{summary.total_trades} records written → journal "
                 f"(record_type=backtest, run_id:{rid})"
@@ -171,6 +171,19 @@ def write_summary_to_journal(
         except Exception as e:
             print(f"WARNING: failed to write record {trade.id[:8]}: {e}")
     return count
+
+
+def print_walkforward(wf: "WalkForwardSummary") -> None:  # noqa: F821
+    """Print in-sample and out-of-sample summaries side by side."""
+    sep = "─" * 60
+    print(f"\n{'═' * 60}")
+    print(f"  WALK-FORWARD RESULTS  (split={wf.split_ratio:.0%}  bar #{wf.split_bar_index})")
+    print(f"{'═' * 60}")
+    print("\n  ── IN-SAMPLE ────────────────────────────────────────────")
+    print_summary(wf.in_sample)
+    print("\n  ── OUT-OF-SAMPLE ────────────────────────────────────────")
+    print_summary(wf.out_of_sample)
+    print(sep)
 
 
 # ---------------------------------------------------------------------------

@@ -38,7 +38,12 @@ class ToolRegistry:
         self._source = data_source or BinanceSource()
         self._schemas: list[dict] = []
         self._callables: dict[str, Callable] = {}
+        self._result_cache: dict[tuple, dict] = {}
         self._discover()
+
+    def clear_cache(self) -> None:
+        """Drop all cached detector results (call between MCP requests)."""
+        self._result_cache.clear()
 
     def _discover(self) -> None:
         for module_info in pkgutil.iter_modules(_detectors_pkg.__path__):
@@ -81,6 +86,12 @@ class ToolRegistry:
             if k not in ("symbol", "timeframe", "bars")
         }
 
+        # Request-scoped result cache — avoids recomputing the same detector
+        # within one analysis session (cleared by clear_cache() between MCP calls)
+        cache_key = (tool_name, symbol, tf, bars)
+        if cache_key in self._result_cache:
+            return self._result_cache[cache_key]
+
         # Delta tools need buy_vol/sell_vol/delta columns from klines
         if tool_name in _DELTA_TOOLS:
             try:
@@ -88,9 +99,11 @@ class ToolRegistry:
             except Exception as e:
                 return {"error": f"Delta data fetch failed for {symbol}/{tf}: {e}"}
             try:
-                return fn(df, **kwargs)
+                result = fn(df, **kwargs)
             except Exception as e:
                 return {"error": f"Detector {tool_name} raised: {e}"}
+            self._result_cache[cache_key] = result
+            return result
 
         try:
             df = self._source.get_ohlc(symbol, tf, bars)
@@ -103,9 +116,11 @@ class ToolRegistry:
             kwargs["timeframe"] = tf
 
         try:
-            return fn(df, **kwargs)
+            result = fn(df, **kwargs)
         except Exception as e:
             return {"error": f"Detector {tool_name} raised: {e}"}
+        self._result_cache[cache_key] = result
+        return result
 
     def tool_names(self) -> list[str]:
         return list(self._callables.keys())

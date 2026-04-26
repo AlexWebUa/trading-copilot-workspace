@@ -45,7 +45,7 @@ _KEYWORD_MAP: dict[str, list[str]] = {
     "stb": ["09_Setups/STB_BTS.md"],
     "bts": ["09_Setups/STB_BTS.md"],
     "judas": ["08_Entry_Models/ICT_Judas_Swing.md"],
-    "vwap": ["04_Market_Profile/VWAP.md"],
+    "vwap": ["04_Market_Profile/VWAP.md", "04_Market_Profile/VWAP_Basics.md"],
     "wyckoff": ["01_Concepts/Wyckoff_Method.md"],
     "fvg": ["03_Tools/FVG.md"],
     "order block": ["03_Tools/Order_Block.md"],
@@ -53,6 +53,37 @@ _KEYWORD_MAP: dict[str, list[str]] = {
     "poi": ["07_POI"],  # directory: inject all POI notes
     "session": ["05_Sessions_Timings"],
     "isqra": ["09_Setups/Isqra_Strategy.md"],
+    # --- Orderflow keywords ---
+    "orderflow": [
+        "04_Market_Profile/Cumulative_Delta.md",
+        "04_Market_Profile/Volume_Profile.md",
+        "11_Trade_Management/Order_Flow.md",
+    ],
+    "order flow": [
+        "04_Market_Profile/Cumulative_Delta.md",
+        "04_Market_Profile/Volume_Profile.md",
+        "11_Trade_Management/Order_Flow.md",
+    ],
+    "cumulative delta": ["04_Market_Profile/Cumulative_Delta.md"],
+    "delta": ["04_Market_Profile/Cumulative_Delta.md"],
+    "volume profile": [
+        "04_Market_Profile/Volume_Profile.md",
+        "04_Market_Profile/POC.md",
+        "04_Market_Profile/Value_Area.md",
+    ],
+    "poc": ["04_Market_Profile/POC.md", "04_Market_Profile/Value_Area.md"],
+    "value area": ["04_Market_Profile/Value_Area.md"],
+    "hvn": ["04_Market_Profile/Volume_Profile.md"],
+    "lvn": ["04_Market_Profile/Volume_Profile.md"],
+    "absorption": ["04_Market_Profile/Footprint_Imbalances.md"],
+    "footprint": ["04_Market_Profile/Footprint_Imbalances.md"],
+    "profile": [
+        "04_Market_Profile/Profile_Logic.md",
+        "04_Market_Profile/Composite_Market_Profile.md",
+    ],
+    "auction": ["04_Market_Profile/Auction_Market_Theory.md"],
+    "initiative": ["04_Market_Profile/Initiative_vs_Responsive.md"],
+    "responsive": ["04_Market_Profile/Initiative_vs_Responsive.md"],
 }
 
 

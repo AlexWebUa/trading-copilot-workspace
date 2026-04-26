@@ -91,6 +91,22 @@ class BacktestSummary:
         return d
 
 
+@dataclass
+class WalkForwardSummary:
+    in_sample: BacktestSummary
+    out_of_sample: BacktestSummary
+    split_ratio: float
+    split_bar_index: int
+
+    def to_dict(self) -> dict:
+        return {
+            "split_ratio": self.split_ratio,
+            "split_bar_index": self.split_bar_index,
+            "in_sample": self.in_sample.to_dict(),
+            "out_of_sample": self.out_of_sample.to_dict(),
+        }
+
+
 # ---------------------------------------------------------------------------
 # BacktestEngine
 # ---------------------------------------------------------------------------
@@ -122,13 +138,14 @@ class BacktestEngine:
         start: str | None = None,
         end: str | None = None,
         write_journal: bool = True,
-    ) -> BacktestSummary:
+        walkforward_split: float | None = None,
+    ) -> "BacktestSummary | WalkForwardSummary":
         """
         Run the bar-by-bar backtest.
 
-        Fetches OHLCV data, evaluates rule conditions bar-by-bar,
-        simulates exits, writes TradeRecords to the journal (unless
-        write_journal=False), and returns a BacktestSummary.
+        If walkforward_split is provided (0 < split < 1), splits the data into
+        in-sample (first split%) and out-of-sample (remaining) periods and
+        returns a WalkForwardSummary with metrics for both.
         """
         rule.validate()
         symbol = symbol.upper()
@@ -137,15 +154,53 @@ class BacktestEngine:
         if df.empty:
             return self._empty_summary(str(uuid.uuid4()), symbol, tf, rule, df)
 
+        # Rebuild registry with delta detectors when the rule needs them
+        if _needs_delta(rule):
+            active_registry = build_detector_registry(include_delta=True)
+        else:
+            active_registry = self._registry
+
+        if walkforward_split is not None:
+            split_i = max(_MIN_LEADING_BARS + 5, int(len(df) * walkforward_split))
+            is_df = df.iloc[:split_i].copy()
+            oos_df = df.iloc[split_i:].copy()
+            run_id = str(uuid.uuid4())
+            is_summary = self._run_loop(
+                is_df, rule, symbol, tf, active_registry, run_id, write_journal
+            )
+            oos_summary = self._run_loop(
+                oos_df, rule, symbol, tf, active_registry, run_id, write_journal=False
+            )
+            return WalkForwardSummary(
+                in_sample=is_summary,
+                out_of_sample=oos_summary,
+                split_ratio=walkforward_split,
+                split_bar_index=split_i,
+            )
+
+        return self._run_loop(
+            df, rule, symbol, tf, active_registry, str(uuid.uuid4()), write_journal
+        )
+
+    def _run_loop(
+        self,
+        df: pd.DataFrame,
+        rule: SetupRule,
+        symbol: str,
+        tf: str,
+        active_registry: dict,
+        run_id: str,
+        write_journal: bool,
+    ) -> "BacktestSummary":
+        """Core bar-by-bar simulation loop on a pre-fetched DataFrame slice."""
         min_i = _MIN_LEADING_BARS
         if len(df) <= min_i + 5:
             print(
                 f"WARNING: insufficient data — need at least {min_i + 5} bars,"
                 f" got {len(df)}. No trades evaluated."
             )
-            return self._empty_summary(str(uuid.uuid4()), symbol, tf, rule, df)
+            return self._empty_summary(run_id, symbol, tf, rule, df)
 
-        run_id = str(uuid.uuid4())
         completed_trades: list[TradeRecord] = []
 
         # Counters
@@ -246,7 +301,7 @@ class BacktestEngine:
 
             # ── IDLE: evaluate conditions ──────────────────────────────────
             if state == _IDLE:
-                ok, cache = evaluate_conditions(rule, slice_df, self._registry)
+                ok, cache = evaluate_conditions(rule, slice_df, active_registry)
                 if not ok:
                     continue
 
