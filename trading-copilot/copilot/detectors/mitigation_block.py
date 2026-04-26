@@ -21,7 +21,7 @@ Detection logic:
   2. In the `sweep_window` bars BEFORE the OB candle, check whether the opposing
      liquidity pool (local swing extreme) was swept (wick + close-back confirmation).
   3. If NO sweep preceded the OB → Mitigation Block.
-  4. Return unmitigated blocks (zone midpoint not yet visited).
+  4. Return unmitigated blocks (no future close has reached zone midpoint).
 """
 
 import numpy as np
@@ -102,10 +102,10 @@ def detect_mitigation_block(
             if prior_sweep:
                 continue  # Liquidity was swept → regular sponsored OB, skip
 
-            # Only include if zone is not yet mitigated (midpoint not visited)
-            future_lows = lows[i + 2:]
+            # Mitigated when a future close reaches the midpoint (wick alone is not enough)
+            future_closes = closes[i + 2:]
             midpoint = (ob_high + ob_low) / 2
-            is_mitigated = len(future_lows) > 0 and bool((future_lows <= midpoint).any())
+            is_mitigated = len(future_closes) > 0 and bool((future_closes <= midpoint).any())
 
             blocks.append({
                 "type": "bullish",
@@ -133,9 +133,10 @@ def detect_mitigation_block(
             if prior_sweep:
                 continue  # Liquidity swept → regular sponsored OB, skip
 
-            future_highs = highs[i + 2:]
+            # Mitigated when a future close reaches the midpoint (wick alone is not enough)
+            future_closes = closes[i + 2:]
             midpoint = (ob_high + ob_low) / 2
-            is_mitigated = len(future_highs) > 0 and bool((future_highs >= midpoint).any())
+            is_mitigated = len(future_closes) > 0 and bool((future_closes >= midpoint).any())
 
             blocks.append({
                 "type": "bearish",
