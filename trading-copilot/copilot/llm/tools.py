@@ -30,7 +30,7 @@ _NO_DF_TOOLS = {"check_multi_tf_alignment", "current_killzone"}
 _PASS_META_TOOLS = {"generate_pine_script"}
 
 # Tools that need OHLCV + delta columns (buy_vol/sell_vol/delta from klines)
-_DELTA_TOOLS = {"detect_cumulative_delta"}
+_DELTA_TOOLS = {"detect_cumulative_delta", "check_cd_divergence_at_structure"}
 
 
 class ToolRegistry:

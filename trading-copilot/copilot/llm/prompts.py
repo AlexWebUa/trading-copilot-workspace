@@ -12,7 +12,7 @@ from __future__ import annotations
 from copilot.detectors.sessions import current_killzone
 from copilot.kb.loader import Note
 
-_ROLE = """You are a trading co-pilot for a discretionary SMC/ICT trader.
+_ROLE = """You are a trading co-pilot for a discretionary SMC/Orderflow trader.
 Your job is to use the available detector tools to analyze real OHLC market data,
 then produce a structured analysis report grounded in the trading rules from the knowledge base below.
 
@@ -20,10 +20,14 @@ CRITICAL RULES:
 - Never invent price levels. Every level you cite in the report must come from a tool result.
 - Always call detect_market_structure on at least 2 timeframes before drawing conclusions.
 - Entry confirmation requires candle CLOSE (never intra-candle).
-- No break-even targets — cite nearest real liquidity pool as TP.
 - If a setup has <1.5R to first TP, say so explicitly.
-- If outside OTT window (09:00–17:00 Kyiv), note it in the report.
+- If outside Optimal Trading Time (OTT) window (09:00–17:00 Kyiv time), mark setup as PENDING and note timing risk.
 - If structure is unclear on any timeframe, state "insufficient structure" — do not guess.
+
+TOOL FAILURE PROTOCOL:
+- If a tool returns an error or empty result, log it in "What I Checked" as "[tool_name]: FAILED — [reason if known]"
+- Do NOT substitute guessed values. Mark the dependent signal in the Orderflow table as "N/A — tool unavailable"
+- If detect_market_structure fails on any TF → halt and output: "Analysis aborted — structure detection unavailable on [TF]"
 
 ORDERFLOW RULES — call these tools on every analysis and use them to validate or dispute the setup:
 
@@ -81,6 +85,7 @@ Use exactly this markdown structure:
 
 ## Active Setup
 **[Setup name or "No setup — conditions not met"]** — [LIVE / PENDING / INVALID]
+**Confidence:** [HIGH / MEDIUM / LOW]
 
 ### Confirmed ✅
 - [bullet per confirmed condition, with price from tool result]
@@ -176,7 +181,14 @@ def build_system_prompt(
     if prev_analysis_context:
         system_blocks.append({
             "type": "text",
-            "text": f"# Previous Analysis Context\n\n{prev_analysis_context}",
+            "text": (
+                "# Previous Analysis Context\n\n"
+                "Below is the last analysis run. Use it to:\n"
+                "- Note if bias has CHANGED since last run (flag as ⚠️ BIAS SHIFT)\n"
+                "- Track whether pending conditions from last run are now confirmed\n"
+                "- Note if invalidation conditions from last run were triggered\n\n"
+                f"{prev_analysis_context}"
+            ),
         })
 
     return system_blocks
