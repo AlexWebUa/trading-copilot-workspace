@@ -9,6 +9,8 @@ Endpoint: GET /fapi/v1/klines
 Spot fallback: set market="spot" to use api.binance.com instead.
 """
 
+import time
+
 import httpx
 import pandas as pd
 
@@ -103,6 +105,80 @@ def fetch_ohlcv_with_delta(
         resp = client.get(f"{base_url}{endpoint}", params=params)
         resp.raise_for_status()
     return normalize_binance_with_delta(resp.json())
+
+
+_MAX_BATCHED_BARS = 100_000
+
+
+def fetch_ohlcv_batched(
+    symbol: str,
+    tf: str,
+    total_bars: int,
+    market: str = "futures",
+    batch_size: int = 1500,
+) -> pd.DataFrame:
+    """
+    Fetch up to total_bars of OHLCV data in batches of batch_size,
+    paginating backwards from the most recent bar.
+    Deduplicates and sorts by timestamp ascending.
+    Returns a single concatenated DataFrame.
+
+    Caps total_bars at 100 000 and prints a warning if exceeded.
+    Sleeps 0.1 s between requests to respect rate limits.
+    """
+    if total_bars > _MAX_BATCHED_BARS:
+        print(
+            f"WARNING: LTF bars capped at 100 000 ({tf}). "
+            f"Consider reducing signal TF bars or using 5m instead of 1m."
+        )
+        total_bars = _MAX_BATCHED_BARS
+
+    assert_valid_tf(tf)
+    symbol = symbol.upper()
+    interval = _TF_MAP[tf]
+
+    if market == "futures":
+        base_url, endpoint = _FUTURES_URL, _FUTURES_ENDPOINT
+    else:
+        base_url, endpoint = _SPOT_URL, _SPOT_ENDPOINT
+
+    frames: list[pd.DataFrame] = []
+    remaining = total_bars
+    end_time_ms: int | None = None  # None → most recent bar
+
+    with httpx.Client(timeout=30.0) as client:
+        while remaining > 0:
+            limit = min(remaining, batch_size)
+            params: dict = {"symbol": symbol, "interval": interval, "limit": limit}
+            if end_time_ms is not None:
+                params["endTime"] = end_time_ms
+
+            resp = client.get(f"{base_url}{endpoint}", params=params)
+            resp.raise_for_status()
+            raw = resp.json()
+            if not raw:
+                break
+
+            batch_df = normalize_binance(raw)
+            frames.append(batch_df)
+            remaining -= len(raw)
+
+            if len(raw) < limit:
+                break  # reached the beginning of available history
+
+            # Paginate backwards: set endTime to 1 ms before the oldest bar's open_time
+            end_time_ms = int(raw[0][0]) - 1
+
+            if remaining > 0:
+                time.sleep(0.1)
+
+    if not frames:
+        from copilot.data.normalize import make_empty
+        return make_empty()
+
+    result = pd.concat(frames)
+    result = result[~result.index.duplicated(keep="first")]
+    return result.sort_index()
 
 
 def fetch_multi_tf(

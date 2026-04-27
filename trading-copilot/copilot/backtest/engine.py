@@ -247,9 +247,21 @@ class BacktestEngine:
             ltf_min = _TF_MINUTES.get(rule.entry_tf, 5)
             if ltf_min < tf_min:
                 ltf_multiplier = tf_min // ltf_min
-                ltf_bars = len(df) * ltf_multiplier + 200
+                ltf_bars_needed = len(df) * ltf_multiplier + 500
                 try:
-                    _ltf_df = self._source.get_ohlc(symbol, rule.entry_tf, ltf_bars)
+                    from copilot.data.binance import BinanceSource, fetch_ohlcv_batched
+                    if isinstance(self._source, BinanceSource):
+                        # Batched fetch handles >1500-bar requests and applies the
+                        # 100k cap with a user-visible warning if exceeded.
+                        _ltf_df = fetch_ohlcv_batched(
+                            symbol, rule.entry_tf, ltf_bars_needed,
+                            market=self._source._market,
+                        )
+                    else:
+                        # Mock / non-Binance source (e.g. tests): delegate to get_ohlc
+                        _ltf_df = self._source.get_ohlc(
+                            symbol, rule.entry_tf, ltf_bars_needed
+                        )
                 except Exception:
                     _ltf_df = None
 
