@@ -1,5 +1,5 @@
 # Trading Co-Pilot — Progress Report
-_Last updated: 2026-04-26_
+_Last updated: 2026-04-27_
 
 ---
 
@@ -15,7 +15,7 @@ Full design rationale and architecture: see [PLAN.md](PLAN.md).
 
 ---
 
-## Current state: Phases 1–6 + 9 cross-cutting improvements complete ✅
+## Current state: Phases 1–6 + 9 cross-cutting improvements + Phase 8 composite detectors + backtest engine upgrades complete ✅
 
 ### What's built and tested
 
@@ -60,6 +60,8 @@ Full design rationale and architecture: see [PLAN.md](PLAN.md).
 | `check_poc_location` | Current price relative to POC | `location` (above/below/at_poc), `in_discount`, `in_premium` |
 | `check_price_in_lvn` | Is current close inside a thin-volume node? | `in_lvn`, `node` |
 | `check_cd_absorption` | High-vol + small-range + close-near-high proxy | `absorption_detected`, `vol_ratio`, `range_atr_ratio` |
+| `check_absorption_at_poi` | Absorption bars coinciding with unmitigated OBs or active FVGs | `absorbed`, `poi_type` (ob/fvg/ob+fvg), `poi_price`, `vol_ratio` |
+| `check_cd_divergence_at_structure` | CD divergence at key swing levels with sweep confirmation | `divergence`, `signal_strength` (weak/moderate/strong), `sweep_confirmed` |
 
 Volume Profile uses **triangular distribution** peaked at the bar's close (rather than uniform) to weight volume toward the close — more accurate for liquid instruments.
 
@@ -87,7 +89,7 @@ Teal/Red = FVG · Blue/Orange = OB · Lime/Maroon = IFVG · Aqua/Fuchsia = Break
 - [`copilot/llm/state.py`](copilot/llm/state.py) — saves all detector results after each analysis to `~/.trading-copilot/reports/{SYMBOL}_{YYYYMMDD}.state.json`; loads previous state and injects a markdown diff (FVG fills, liquidity sweeps, POC shifts >0.5%, BOS changes) into the next analysis as `# Previous Analysis Context`
 
 **MCP server** (Claude Desktop / Cowork mode):
-- [`copilot/mcp_server.py`](copilot/mcp_server.py) — exposes **all 22 tools** (21 detectors + `generate_pine_script`) over stdio. Clears request-scoped cache before each dispatch.
+- [`copilot/mcp_server.py`](copilot/mcp_server.py) — exposes **all 24 tools** (23 detectors + `generate_pine_script`) over stdio. Clears request-scoped cache before each dispatch.
 - [`claude_desktop_config.json`](claude_desktop_config.json) — ready-to-merge Desktop registration config
 - [`run_mcp.bat`](run_mcp.bat) — standalone launcher with correct PYTHONPATH
 
@@ -100,7 +102,7 @@ Teal/Red = FVG · Blue/Orange = OB · Lime/Maroon = IFVG · Aqua/Fuchsia = Break
 - `backtest --rule <name> --tf <tf> --bars <N> [--no-write] [--split <ratio>]` — bar-by-bar simulation; `--split 0.7` runs IS/OOS walk-forward and prints both metric sections
 - `stats [--group setup|tool|session|dow|account|htf_bias] [--setup X] [--symbol S] [--last N]` — aggregated winrate / avg RR / profit factor / expectancy; `--group tool` shows tool-effectiveness ranking (Δwinrate vs baseline)
 
-**Tests — 248/248 pass** (`python -m pytest tests/`):
+**Tests — 281/281 pass** (`python -m pytest tests/`):
 
 | Test file | Count | Phase |
 |---|---|---|
@@ -120,20 +122,22 @@ Teal/Red = FVG · Blue/Orange = OB · Lime/Maroon = IFVG · Aqua/Fuchsia = Break
 | `test_journal.py` | 33 | 3 |
 | `test_detectors_cumulative_delta.py` | 15 | 4 |
 | `test_detectors_volume_profile.py` | 17 | 4 |
-| `test_backtest_rules.py` | 23 | 5 |
+| `test_backtest_rules.py` | 32 | 5 |
 | `test_backtest_simulate.py` | 19 | 5 |
-| `test_backtest_engine.py` | 10 | 5 |
+| `test_backtest_engine.py` | 22 | 5 |
 | `test_backtest_compare.py` | — | 6 |
 | `test_backtest_rules_orderflow.py` | — | 6 |
 | `test_detectors_orderflow_composite.py` | — | 6 |
 | `test_stats_aggregator.py` | — | 6 |
+| `test_detectors_absorption_poi.py` | 6 | 8 |
+| `test_detectors_cd_divergence_structure.py` | 6 | 8 |
 
 **Journal module** (`copilot/journal/`):
 
 | File | Purpose |
 |---|---|
-| [`copilot/journal/record.py`](copilot/journal/record.py) | `TradeRecord` dataclass + `compute_rr`, `session_from_ts`, `parse_ts` utilities |
-| [`copilot/journal/db.py`](copilot/journal/db.py) | SQLite connection with WAL mode + schema (`PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL`); deletes legacy `journal.jsonl` on first open |
+| [`copilot/journal/record.py`](copilot/journal/record.py) | `TradeRecord` dataclass + `compute_rr`, `session_from_ts`, `parse_ts` utilities; includes `partial_exits: list[dict]` for partial-TP tracking |
+| [`copilot/journal/db.py`](copilot/journal/db.py) | SQLite connection with WAL mode + schema; `_apply_migrations()` auto-adds missing columns (e.g. `partial_exits`) to existing databases; deletes legacy `journal.jsonl` on first open |
 | [`copilot/journal/writer.py`](copilot/journal/writer.py) | `append_record` (`INSERT OR IGNORE`), `update_record` (SQL `UPDATE`) |
 | [`copilot/journal/reader.py`](copilot/journal/reader.py) | `load_all`, `filter_by` (SQL WHERE builder, 11 dimensions + tag post-filter), `get_by_id` (exact + prefix LIKE) |
 | [`copilot/journal/__init__.py`](copilot/journal/__init__.py) | Re-exports all public API |
@@ -144,11 +148,11 @@ Teal/Red = FVG · Blue/Orange = OB · Lime/Maroon = IFVG · Aqua/Fuchsia = Break
 
 | File | Purpose |
 |---|---|
-| `rules.py` | `Condition` + `SetupRule` dataclasses, dotted-path field navigation, `evaluate_conditions()`, built-in rules (`fvg_ob_long`, `sweep_bos_long`, `ob_fvg_short`); `build_detector_registry(include_delta=True/False)` |
+| `rules.py` | `Condition`, `HTFCondition`, `TPLevel`, `SetupRule` dataclasses; `evaluate_conditions()`, `evaluate_conditions_on_slice()`; built-in rules; `build_detector_registry(include_delta=True/False)` |
 | `rules_orderflow.py` | Group A (VP-only), B (CD-only), C (VP+CD combined) orderflow-augmented rules; `sweep_cd_manipulation_long/short`, `poc_hvn_ob_long`, `sponsored_cd_ob_hvn_long`, `compression_vp_break_long` |
 | `simulate.py` | `simulated_exit()` (SL wins on same-bar conflict), `resolve_entry/sl/tp()` |
-| `engine.py` | `BacktestEngine.run()` — IDLE→SIGNAL→IN_TRADE state machine; `walkforward_split` param for IS/OOS split; `_run_loop()` private method; CD rules automatically get delta-enriched df |
-| `report.py` | `trades_to_summary()`, `print_summary()`, `print_walkforward()`, `write_summary_to_journal()` |
+| `engine.py` | `BacktestEngine.run()` — IDLE→SIGNAL→LTF_SCAN→IN_TRADE→IN_TRADE_P2 state machine; multi-TF HTF conditions with per-candle caching; LTF entry confirmation (5m scan within each HTF bar); partial TP + `sl_after_tp1`; time-based exit (`max_bars_open`); fee model (`fee_bps`); variable risk reporting (`risk_pct`, `pnl_pct_series`, `monthly_pnl_pct`); `walkforward_split` for IS/OOS split |
+| `report.py` | `trades_to_summary()` (includes `"expired"` result; `risk_pct`; `monthly_pnl_pct`), `print_summary()`, `print_walkforward()`, `write_summary_to_journal()` |
 | `compare.py` | `compare_live_vs_backtest()` — loads journal, splits live vs backtest records by `run_id`, prints side-by-side metrics |
 
 **Stats module** (`copilot/stats/`):
@@ -209,6 +213,14 @@ Append-only SQLite DB at `~/.trading-copilot/journal/journal.db` (WAL mode). One
 ### Phase 5 — Backtest engine ✅ DONE
 Bar-by-bar historical simulation. Strict look-ahead prevention. Results written to journal as `record_type="backtest"`. Walk-forward split (`--split N`) for IS/OOS validation.
 
+**Backtest engine upgrades (6 changes, landed after Phase 6):**
+1. **Multi-TF HTF Conditions** — `HTFCondition` dataclass; evaluated against pre-fetched HTF DataFrames, cached by `(htf_tf, detector, htf_bar_idx)` so each HTF candle is evaluated at most once
+2. **LTF Entry Confirmation** — 3-tier state machine (`_LTF_SCAN`); 5m bars scanned inside each HTF bar; `entry_tf`, `entry_conditions`, `entry_after_ltf`, `max_entry_wait_bars_ltf` fields on `SetupRule`
+3. **Partial TP + Trade Management** — `TPLevel` dataclass; `tp_levels`, `sl_after_tp1`; weighted-average `pnl_r` across `partial_exits`; `_IN_TRADE_P2` state for TP2 tracking
+4. **Time-Based Exit** — `max_bars_open` field; expired trades get `result="expired"` with RR-based win/loss classification in `report.py`
+5. **Fee Model** — `fee_bps` field; fee deducted in `_finalize_trade` using original SL as risk reference (not the moved-to-BE SL)
+6. **Variable Risk Reporting** — `risk_pct` field; `pnl_pct_series`, `total_pnl_pct`, `monthly_pnl_pct` in `BacktestSummary`
+
 ### Phase 6 — Statistics aggregation ✅ DONE
 `copilot/stats/` — winrate, avg RR, profit factor, expectancy. Group by: setup, tool, session, day of week, account type, HTF bias, live vs backtest. Tool-effectiveness ranking: Δwinrate per confirmed tool vs baseline. Orderflow-augmented rules (Group A/B/C) in `rules_orderflow.py`. Live vs backtest comparison via `compare.py`.
 
@@ -226,10 +238,15 @@ Bar-by-bar historical simulation. Strict look-ahead prevention. Results written 
 ### Phase 7 — Dashboard TUI (next)
 `python -m copilot dashboard` → `rich` terminal UI: equity curve, rolling winrate, session heatmap, top setups by profit factor, tool leaderboard, worst conditions. Implemented with `rich.table` + `rich.panel`.
 
-### Phase 8 — Quality-of-life (ongoing, LOW)
-- Scheduled reports at killzone times (09:00 / 15:00 / 17:00 Kyiv)
-- Embeddings-based KB retrieval if keyword matching proves brittle
-- Report archive browser in REPL (`history`, `read`)
+### Phase 8 — Quality-of-life (ongoing)
+**Composite MCP detectors ✅ DONE:**
+- `check_absorption_at_poi` — identifies absorption bars (high volume, tiny range, close near high) coinciding with unmitigated OBs or active FVGs; returns `poi_type` (ob/fvg/ob+fvg) and `vol_ratio`
+- `check_cd_divergence_at_structure` — detects CD divergence at key structural swing levels with sweep confirmation; grades `signal_strength` as weak/moderate/strong; registered in `_DELTA_TOOLS`
+
+**Remaining:**
+- [ ] Scheduled reports at killzone times (09:00 / 15:00 / 17:00 Kyiv)
+- [ ] Embeddings-based KB retrieval if keyword matching proves brittle
+- [ ] Report archive browser in REPL (`history`, `read`)
 
 ### Phase 9 — More instruments (after crypto workflow is solid)
 Deferred until Phases 3–7 are stable. Scope: **XAU/USD → EUR/USD → GER40 + EU50 → NAS100 + SP500**.
@@ -264,3 +281,9 @@ Each = one new `copilot/data/*.py` implementing `DataSource`. Detectors unchange
 | State persistence + diff injection | Analyst sees what changed since last run (filled FVGs, new sweeps, POC shifts) without re-reading old reports |
 | Walk-forward split in backtest | Single IS/OOS validation run via `--split N`; avoids manual dataset splitting |
 | `include_delta` flag in registry | CD detector opts into delta-enriched df — backtest engine enables it only for rules that need it |
+| HTF cache keyed `(htf_tf, detector, htf_bar_idx)` | Each HTF candle is evaluated at most once per bar loop — prevents redundant detector calls across HTF condition checks |
+| TP2 uses `original_sl` for RR math | After SL moves to BE, `original_sl` is passed to `_finalize_trade` and `_transition_to_p2` so TP2 price is still meaningful relative to original risk |
+| `_IN_TRADE_P2` checked before `_IN_TRADE` | State priority: trade management happens before new entry logic — prevents a partial-TP trade from re-entering `_IN_TRADE` logic on the same bar |
+| Fee deducted using `original_sl` as risk | After BE move the effective SL risk would collapse to 0; using original risk keeps fee_r a meaningful R fraction |
+| `evaluate_conditions_on_slice()` extracted | LTF entry conditions need the same operator logic as HTF conditions without requiring a full `SetupRule` — extracted so both callers share the implementation |
+| `partial_exits` in `TradeRecord` + auto-migration | Schema change handled by `_apply_migrations()` via `PRAGMA table_info` — existing databases gain the column without a manual migration step |

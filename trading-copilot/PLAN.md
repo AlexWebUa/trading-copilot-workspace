@@ -598,7 +598,7 @@ Requires intra-candle bid/ask volume per price level. Binance public REST does n
 
 ---
 
-### Phase 5 — Backtest engine ★ MEDIUM (after Phase 3 schema is frozen)
+### Phase 5 — Backtest engine ✅ DONE
 
 Run the detector library over historical OHLC data with simulated setup conditions. Results written to journal as `record_type="backtest"` entries, enabling live vs backtest comparison by the same metrics.
 
@@ -618,22 +618,42 @@ copilot/
 
 Engine passes `df.iloc[:i+1]` to every detector call at bar index `i`. Entry triggered by close of bar `i+1`. Exit simulated on subsequent bars (first bar that touches TP or SL wick).
 
-#### SetupRule
+#### SetupRule (current schema)
 
 ```python
 @dataclass
 class SetupRule:
-    name: str                        # "1h3m_long"
-    direction: str                   # "long" | "short"
-    conditions: list[Condition]      # detector name + field + assertion
-    entry_after: str                 # "bos_close" | "fvg_retrace_ce"
-    sl_logic: str                    # "below_swept_low" | "ob_lower"
-    tp_logic: str                    # "liquidity_above" | "next_hvn"
-    required_session: list[str] | None
-    required_killzone: list[str] | None
+    name: str
+    direction: str                        # "long" | "short"
+    conditions: list[Condition]           # entry TF detector conditions
+    entry_after: str                      # "next_open" | "signal_close" | "fvg_ce" | ...
+    sl_logic: str                         # "atr:N" | "ob_lower" | ...
+    tp_logic: str                         # "rr:N" | "liquidity_above" | ...
+    # Multi-TF
+    htf_conditions: list[HTFCondition]    # evaluated on separate pre-fetched HTF DataFrames
+    # LTF entry confirmation (3-tier flow)
+    entry_tf: str | None                  # e.g. "5m" — if set, enters _LTF_SCAN after signal
+    entry_conditions: list[Condition]     # conditions on LTF bars
+    entry_after_ltf: str                  # "signal_close" | "next_open"
+    max_entry_wait_bars_ltf: int          # abort LTF scan after N bars
+    # Partial TP management
+    tp_levels: list[TPLevel]              # e.g. [TPLevel("rr:1.8", 0.5), TPLevel("rr:4.0", 0.5)]
+    sl_after_tp1: str | None              # "be" | None
+    # Trade management
+    max_bars_open: int | None             # time-based exit; result="expired"
+    fee_bps: float                        # e.g. 8.0 = 0.08% per side; deducted as R fraction
+    risk_pct: float                       # account risk % for equity curve calculation
 ```
 
 One `TradeRecord` per triggered entry; `tags` includes `["backtest", "run_id:<uuid>"]`.
+
+#### Engine state machine
+
+`_IDLE` → `_SIGNAL` → [`_LTF_SCAN`] → `_IN_TRADE` → [`_IN_TRADE_P2`] → exit
+
+- HTF conditions evaluated via `_evaluate_htf_conditions()` using per-HTF-bar cache
+- LTF scan cursor seeded by `_find_ltf_idx()` — no look-ahead across TF boundaries
+- `_IN_TRADE_P2` checked before `_IN_TRADE` in the per-bar loop so partial-TP management happens before new entry logic
 
 ---
 
@@ -694,6 +714,11 @@ Implemented with `rich.table`, `rich.panel`. Launched via `python -m copilot das
 
 ### Phase 8 — Quality-of-life (ongoing)
 
+**Composite MCP detectors ✅ DONE:**
+- [x] `check_absorption_at_poi` — identifies absorption bars (high vol, tiny range, close near high) at unmitigated OBs or active FVGs; `poi_type` = ob/fvg/ob+fvg; registered in `_DELTA_TOOLS`.
+- [x] `check_cd_divergence_at_structure` — CD divergence at key structural swing levels; sweep confirmation required; `signal_strength` graded weak/moderate/strong; registered in `_DELTA_TOOLS`.
+
+**Remaining:**
 - [ ] Scheduled reports at killzone times (09:00 / 15:00 / 17:00 Kyiv).
 - [ ] Embeddings-based KB retrieval if keyword matching proves brittle.
 - [ ] Report archive browser in REPL (`history`, `read`).
@@ -718,11 +743,12 @@ Add data sources in order of ease: **XAU/USD → EUR/USD → GER40 + EU50 → NA
 | 4a | Cumulative Delta detector | **HIGH** | ✅ DONE |
 | 4b | Volume Profile HVN/LVN detector | MEDIUM | ✅ DONE |
 | 4c | Footprint Imbalances | DEFERRED | L2 data unavailable |
-| 5 | Backtest engine | MEDIUM | ✅ DONE (+ walk-forward split) |
+| 5 | Backtest engine | MEDIUM | ✅ DONE (+ walk-forward split + 6 engine upgrades) |
 | 6 | Statistics aggregation | MEDIUM | ✅ DONE |
 | — | Cross-cutting improvements (9 items) | MEDIUM | ✅ DONE |
 | 7 | Dashboard TUI | LOW-MEDIUM | ← **NEXT** |
-| 8 | QoL (scheduled reports, embeddings) | LOW | pending |
+| 8a | Composite MCP detectors (absorption, CD divergence) | MEDIUM | ✅ DONE |
+| 8b | QoL (scheduled reports, embeddings, archive browser) | LOW | pending |
 | 9 | More instruments (XAU, FX, indices) | LOW | pending |
 
 ---

@@ -56,6 +56,7 @@ def test_to_dict_contains_all_keys():
         "direction", "entry_price", "sl_price", "tp_prices", "exit_price",
         "result", "pnl_r", "rr_planned", "session", "killzone",
         "day_of_week", "htf_bias", "notes", "report_path", "tags",
+        "partial_exits",
     }
     assert expected_keys == set(d.keys())
 

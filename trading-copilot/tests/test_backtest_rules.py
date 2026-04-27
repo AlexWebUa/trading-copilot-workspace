@@ -251,3 +251,132 @@ def test_builtin_rules_roundtrip():
         assert restored.name == rule.name
         assert restored.direction == rule.direction
         assert len(restored.conditions) == len(rule.conditions)
+
+
+# ---------------------------------------------------------------------------
+# HTFCondition
+# ---------------------------------------------------------------------------
+
+def test_htf_condition_evaluate():
+    from copilot.backtest.rules import HTFCondition
+    htf = HTFCondition("detect_market_structure", "state", "eq", "bullish", htf_tf="4h")
+    assert htf.evaluate({"state": "bullish"}) is True
+    assert htf.evaluate({"state": "bearish"}) is False
+
+
+def test_htf_condition_roundtrip():
+    from copilot.backtest.rules import HTFCondition
+    htf = HTFCondition("det", "field.0.val", "gte", 3.5, {"k": "v"}, "4h")
+    restored = HTFCondition.from_dict(htf.to_dict())
+    assert restored.detector == htf.detector
+    assert restored.field == htf.field
+    assert restored.op == htf.op
+    assert restored.value == htf.value
+    assert restored.kwargs == htf.kwargs
+    assert restored.htf_tf == htf.htf_tf
+
+
+def test_htf_condition_invalid_op_raises():
+    from copilot.backtest.rules import HTFCondition, RuleConfigError
+    with pytest.raises(RuleConfigError):
+        HTFCondition("det", "f", "INVALID", None)
+
+
+# ---------------------------------------------------------------------------
+# TPLevel
+# ---------------------------------------------------------------------------
+
+def test_tp_level_roundtrip():
+    from copilot.backtest.rules import TPLevel
+    lvl = TPLevel("rr:1.8", 0.5)
+    restored = TPLevel.from_dict(lvl.to_dict())
+    assert restored.logic == lvl.logic
+    assert restored.size_pct == lvl.size_pct
+
+
+# ---------------------------------------------------------------------------
+# SetupRule with new fields — serialization roundtrip
+# ---------------------------------------------------------------------------
+
+def test_setup_rule_new_fields_roundtrip():
+    from copilot.backtest.rules import HTFCondition, TPLevel
+    rule = SetupRule(
+        name="advanced",
+        direction="long",
+        conditions=[Condition("detect_fvg", "count_active", "gt", 0)],
+        entry_after="next_open",
+        sl_logic="atr:1.5",
+        tp_logic="rr:2.0",
+        htf_conditions=[HTFCondition("detect_market_structure", "state", "eq", "bullish", htf_tf="4h")],
+        entry_tf="5m",
+        entry_conditions=[Condition("detect_bos", "direction", "eq", "bullish")],
+        entry_after_ltf="signal_close",
+        max_entry_wait_bars_ltf=30,
+        tp_levels=[TPLevel("rr:1.8", 0.5), TPLevel("rr:4.0", 0.5)],
+        sl_after_tp1="be",
+        max_bars_open=120,
+        fee_bps=8.0,
+        risk_pct=0.5,
+    )
+    d = rule.to_dict()
+    restored = SetupRule.from_dict(d)
+    assert restored.entry_tf == "5m"
+    assert restored.entry_after_ltf == "signal_close"
+    assert restored.max_entry_wait_bars_ltf == 30
+    assert len(restored.htf_conditions) == 1
+    assert restored.htf_conditions[0].htf_tf == "4h"
+    assert len(restored.entry_conditions) == 1
+    assert len(restored.tp_levels) == 2
+    assert restored.tp_levels[0].logic == "rr:1.8"
+    assert restored.tp_levels[1].size_pct == 0.5
+    assert restored.sl_after_tp1 == "be"
+    assert restored.max_bars_open == 120
+    assert restored.fee_bps == 8.0
+    assert restored.risk_pct == 0.5
+
+
+def test_setup_rule_validate_entry_after_ltf():
+    """entry_after_ltf must be 'signal_close' or 'next_open' when entry_tf is set."""
+    rule = SetupRule(
+        name="x", direction="long",
+        conditions=[Condition("det", "f", "eq", 1)],
+        entry_after="next_open", sl_logic="atr:1.5", tp_logic="rr:2.0",
+        entry_tf="5m",
+        entry_after_ltf="fvg_ce",  # invalid for LTF
+    )
+    with pytest.raises(RuleConfigError):
+        rule.validate()
+
+
+# ---------------------------------------------------------------------------
+# evaluate_conditions_on_slice
+# ---------------------------------------------------------------------------
+
+def test_evaluate_conditions_on_slice_all_pass():
+    from copilot.backtest.rules import evaluate_conditions_on_slice
+    registry = {
+        "det_a": lambda *a, **k: {"v": 1},
+        "det_b": lambda *a, **k: {"v": 2},
+    }
+    conds = [
+        Condition("det_a", "v", "eq", 1),
+        Condition("det_b", "v", "eq", 2),
+    ]
+    ok, cache = evaluate_conditions_on_slice(conds, None, registry)
+    assert ok is True
+    assert "det_a" in cache and "det_b" in cache
+
+
+def test_evaluate_conditions_on_slice_one_fails():
+    from copilot.backtest.rules import evaluate_conditions_on_slice
+    registry = {"det_a": lambda *a, **k: {"v": 99}}
+    conds = [Condition("det_a", "v", "eq", 1)]
+    ok, _ = evaluate_conditions_on_slice(conds, None, registry)
+    assert ok is False
+
+
+def test_evaluate_conditions_on_slice_empty_returns_true():
+    from copilot.backtest.rules import evaluate_conditions_on_slice
+    ok, cache = evaluate_conditions_on_slice([], None, {})
+    assert ok is True
+    assert cache == {}

@@ -28,13 +28,27 @@ def trades_to_summary(
     skipped_entry: int,
     bars_in_trade_list: list[int],
     trades: list[TradeRecord],
+    risk_pct: float = 1.0,
 ) -> "BacktestSummary":  # noqa: F821
     from copilot.backtest.engine import BacktestSummary
 
-    completed = [t for t in trades if t.result in ("win", "loss", "be")]
-    wins = [t for t in completed if t.result == "win"]
-    losses = [t for t in completed if t.result == "loss"]
-    bes = [t for t in completed if t.result == "be"]
+    # Change 4: "expired" trades are included and classified by pnl_r sign
+    completed = [t for t in trades if t.result in ("win", "loss", "be", "expired")]
+    wins = [
+        t for t in completed
+        if t.result == "win"
+        or (t.result == "expired" and (t.pnl_r or 0.0) > 0.01)
+    ]
+    losses = [
+        t for t in completed
+        if t.result == "loss"
+        or (t.result == "expired" and (t.pnl_r or 0.0) < -0.01)
+    ]
+    bes = [
+        t for t in completed
+        if t.result == "be"
+        or (t.result == "expired" and abs(t.pnl_r or 0.0) <= 0.01)
+    ]
 
     n_w = len(wins)
     n_l = len(losses)
@@ -66,6 +80,14 @@ def trades_to_summary(
 
     session_breakdown = _session_breakdown(completed)
 
+    # Change 6: variable risk reporting
+    pnl_pct_series = [round(r * risk_pct, 4) for r in pnl_series]
+    total_pnl_pct = round(sum(pnl_pct_series), 4)
+
+    # Approximate months in period from timestamps
+    months_in_period = _estimate_months(start, end)
+    monthly_pnl_pct = round(total_pnl_pct / months_in_period, 4) if months_in_period > 0 else 0.0
+
     return BacktestSummary(
         run_id=run_id,
         symbol=symbol,
@@ -93,6 +115,10 @@ def trades_to_summary(
         pnl_r_series=pnl_series,
         session_breakdown=session_breakdown,
         trades=trades,
+        risk_pct=risk_pct,
+        pnl_pct_series=pnl_pct_series,
+        total_pnl_pct=total_pnl_pct,
+        monthly_pnl_pct=monthly_pnl_pct,
     )
 
 
@@ -131,6 +157,13 @@ def print_summary(summary: "BacktestSummary") -> None:  # noqa: F821
             f"Avg bars/trade: {summary.avg_bars_in_trade}   "
             f"Max: {summary.max_bars_in_trade}"
         )
+        # Change 6: display monthly_pnl_pct prominently
+        if summary.risk_pct != 1.0 or summary.monthly_pnl_pct != 0.0:
+            print(
+                f"Risk/trade: {summary.risk_pct}%   "
+                f"Total PnL: {summary.total_pnl_pct:+.2f}%   "
+                f"Monthly: {summary.monthly_pnl_pct:+.2f}%/mo"
+            )
 
     if summary.session_breakdown:
         print(sep)
@@ -211,11 +244,11 @@ def _session_breakdown(trades: list[TradeRecord]) -> dict[str, dict]:
         if sess not in breakdown:
             breakdown[sess] = {"trades": 0, "wins": 0, "losses": 0, "be": 0, "pnl_r": []}
         breakdown[sess]["trades"] += 1
-        if t.result == "win":
+        if t.result in ("win",) or (t.result == "expired" and (t.pnl_r or 0.0) > 0.01):
             breakdown[sess]["wins"] += 1
-        elif t.result == "loss":
+        elif t.result in ("loss",) or (t.result == "expired" and (t.pnl_r or 0.0) < -0.01):
             breakdown[sess]["losses"] += 1
-        elif t.result == "be":
+        elif t.result in ("be", "expired"):
             breakdown[sess]["be"] += 1
         if t.pnl_r is not None:
             breakdown[sess]["pnl_r"].append(t.pnl_r)
@@ -225,3 +258,16 @@ def _session_breakdown(trades: list[TradeRecord]) -> dict[str, dict]:
         stats["winrate"] = round(stats["wins"] / n, 4) if n else 0.0
 
     return breakdown
+
+
+def _estimate_months(start: str, end: str) -> float:
+    """Estimate number of months between two ISO date strings."""
+    try:
+        from datetime import datetime, timezone
+        fmt = "%Y-%m-%dT%H:%M:%SZ"
+        s = datetime.strptime(start[:19] + "Z", fmt).replace(tzinfo=timezone.utc)
+        e = datetime.strptime(end[:19] + "Z", fmt).replace(tzinfo=timezone.utc)
+        days = (e - s).days
+        return max(days / 30.44, 1.0)  # at least 1 month to avoid inflated monthly
+    except Exception:
+        return 1.0

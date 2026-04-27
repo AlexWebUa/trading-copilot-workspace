@@ -43,12 +43,17 @@ CREATE TABLE IF NOT EXISTS trades (
     tp_prices       TEXT NOT NULL DEFAULT '[]',
     tools_confirmed TEXT NOT NULL DEFAULT '[]',
     tools_pending   TEXT NOT NULL DEFAULT '[]',
-    tags            TEXT NOT NULL DEFAULT '[]'
+    tags            TEXT NOT NULL DEFAULT '[]',
+    partial_exits   TEXT NOT NULL DEFAULT '[]'
 )
 """
 
+_MIGRATIONS = [
+    "ALTER TABLE trades ADD COLUMN partial_exits TEXT NOT NULL DEFAULT '[]'",
+]
+
 # List-type fields serialised as JSON text
-_LIST_FIELDS = frozenset({"tp_prices", "tools_confirmed", "tools_pending", "tags"})
+_LIST_FIELDS = frozenset({"tp_prices", "tools_confirmed", "tools_pending", "tags", "partial_exits"})
 
 
 def get_connection(path: Path | None = None) -> sqlite3.Connection:
@@ -66,7 +71,22 @@ def get_connection(path: Path | None = None) -> sqlite3.Connection:
     conn.execute("PRAGMA synchronous=NORMAL")
     conn.execute(_CREATE_TABLE)
     conn.commit()
+    _apply_migrations(conn)
     return conn
+
+
+def _apply_migrations(conn: sqlite3.Connection) -> None:
+    """Apply schema migrations that add columns missing from older databases."""
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(trades)")}
+    for stmt in _MIGRATIONS:
+        # Extract the column name from "ALTER TABLE trades ADD COLUMN <name> ..."
+        col = stmt.split("ADD COLUMN")[1].strip().split()[0]
+        if col not in existing:
+            try:
+                conn.execute(stmt)
+                conn.commit()
+            except Exception:
+                pass
 
 
 # ---------------------------------------------------------------------------

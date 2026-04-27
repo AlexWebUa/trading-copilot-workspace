@@ -33,6 +33,7 @@ _VALID_OPS = frozenset(
 )
 _VALID_DIRECTIONS = frozenset({"long", "short"})
 _VALID_ENTRY_AFTER = frozenset({"next_open", "signal_close", "fvg_ce", "ob_midpoint"})
+_VALID_ENTRY_AFTER_LTF = frozenset({"signal_close", "next_open"})
 
 
 class RuleConfigError(ValueError):
@@ -90,6 +91,62 @@ class Condition:
 
 
 @dataclass
+class HTFCondition:
+    """Like Condition but evaluated on a separate higher-timeframe DataFrame."""
+    detector: str
+    field: str
+    op: str
+    value: Any = None
+    kwargs: dict = field(default_factory=dict)
+    htf_tf: str = "4h"
+
+    def __post_init__(self) -> None:
+        if self.op not in _VALID_OPS:
+            raise RuleConfigError(
+                f"HTFCondition.op '{self.op}' invalid. Valid: {sorted(_VALID_OPS)}"
+            )
+
+    def evaluate(self, result: dict) -> bool:
+        val = _get_field(result, self.field)
+        return _check_op(val, self.op, self.value)
+
+    def to_dict(self) -> dict:
+        return {
+            "detector": self.detector,
+            "field": self.field,
+            "op": self.op,
+            "value": self.value,
+            "kwargs": self.kwargs,
+            "htf_tf": self.htf_tf,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "HTFCondition":
+        return cls(
+            detector=d["detector"],
+            field=d["field"],
+            op=d["op"],
+            value=d.get("value"),
+            kwargs=d.get("kwargs", {}),
+            htf_tf=d.get("htf_tf", "4h"),
+        )
+
+
+@dataclass
+class TPLevel:
+    """A single take-profit level for multi-leg TP management."""
+    logic: str      # same format as tp_logic: "rr:1.8", "liquidity", "next_hvn"
+    size_pct: float  # fraction of position to close: 0.5 = 50%
+
+    def to_dict(self) -> dict:
+        return {"logic": self.logic, "size_pct": self.size_pct}
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "TPLevel":
+        return cls(logic=d["logic"], size_pct=d["size_pct"])
+
+
+@dataclass
 class SetupRule:
     """
     Declarative description of a trading setup.
@@ -111,6 +168,31 @@ class SetupRule:
       "rr:N"       — fixed R:R ratio
       "liquidity"  — nearest unswept liquidity pool
       "next_hvn"   — nearest High Volume Node
+
+    entry_tf / entry_conditions:
+      When entry_tf is set, the engine uses a 3-tier flow:
+        Signal TF conditions pass → _LTF_SCAN state → entry_conditions
+        evaluated on LTF bars → entry triggered → LTF exit simulation.
+
+    htf_conditions:
+      Evaluated on a separate HTF DataFrame. All must pass on the same bar
+      (after LTF conditions) for the signal to fire.
+
+    tp_levels:
+      Multi-leg TP. If non-empty, overrides tp_logic.
+      Example: [TPLevel("rr:1.8", 0.5), TPLevel("rr:4.0", 0.5)]
+
+    sl_after_tp1:
+      SL logic after TP1 hit. "be" → breakeven, "atr:N" → trail. None = keep.
+
+    max_bars_open:
+      Close trade after this many signal-TF bars. None = no limit.
+
+    fee_bps:
+      Round-trip fee in basis points (e.g. 8.0 = 0.08%).
+
+    risk_pct:
+      Risk per trade as % of account for reporting. Default 1%.
     """
     name: str
     direction: str
@@ -120,6 +202,22 @@ class SetupRule:
     tp_logic: str
     required_session: list[str] | None = None
     required_killzone: list[str] | None = None
+    # Change 1: HTF conditions
+    htf_conditions: list[HTFCondition] = field(default_factory=list)
+    # Change 2: LTF entry confirmation
+    entry_tf: str | None = None
+    entry_conditions: list[Condition] = field(default_factory=list)
+    entry_after_ltf: str = "signal_close"
+    max_entry_wait_bars_ltf: int = 50
+    # Change 3: Partial TP
+    tp_levels: list[TPLevel] = field(default_factory=list)
+    sl_after_tp1: str | None = None
+    # Change 4: Time-based exit
+    max_bars_open: int | None = None
+    # Change 5: Fee model
+    fee_bps: float = 0.0
+    # Change 6: Variable risk
+    risk_pct: float = 1.0
 
     def validate(self) -> None:
         if self.direction not in _VALID_DIRECTIONS:
@@ -130,6 +228,19 @@ class SetupRule:
             )
         if not self.conditions:
             raise RuleConfigError(f"Rule '{self.name}' has no conditions")
+        if self.entry_tf and self.entry_after_ltf not in _VALID_ENTRY_AFTER_LTF:
+            raise RuleConfigError(
+                f"entry_after_ltf '{self.entry_after_ltf}' invalid. "
+                f"Valid: {sorted(_VALID_ENTRY_AFTER_LTF)}"
+            )
+        for htf_c in self.htf_conditions:
+            if htf_c.op not in _VALID_OPS:
+                raise RuleConfigError(f"HTFCondition.op '{htf_c.op}' invalid")
+        for tp_lvl in self.tp_levels:
+            if tp_lvl.size_pct <= 0 or tp_lvl.size_pct > 1:
+                raise RuleConfigError(
+                    f"TPLevel.size_pct {tp_lvl.size_pct} must be in (0, 1]"
+                )
 
     def to_dict(self) -> dict:
         return {
@@ -141,6 +252,16 @@ class SetupRule:
             "tp_logic": self.tp_logic,
             "required_session": self.required_session,
             "required_killzone": self.required_killzone,
+            "htf_conditions": [c.to_dict() for c in self.htf_conditions],
+            "entry_tf": self.entry_tf,
+            "entry_conditions": [c.to_dict() for c in self.entry_conditions],
+            "entry_after_ltf": self.entry_after_ltf,
+            "max_entry_wait_bars_ltf": self.max_entry_wait_bars_ltf,
+            "tp_levels": [t.to_dict() for t in self.tp_levels],
+            "sl_after_tp1": self.sl_after_tp1,
+            "max_bars_open": self.max_bars_open,
+            "fee_bps": self.fee_bps,
+            "risk_pct": self.risk_pct,
         }
 
     @classmethod
@@ -154,6 +275,16 @@ class SetupRule:
             tp_logic=d.get("tp_logic", "rr:2.0"),
             required_session=d.get("required_session"),
             required_killzone=d.get("required_killzone"),
+            htf_conditions=[HTFCondition.from_dict(c) for c in d.get("htf_conditions", [])],
+            entry_tf=d.get("entry_tf"),
+            entry_conditions=[Condition.from_dict(c) for c in d.get("entry_conditions", [])],
+            entry_after_ltf=d.get("entry_after_ltf", "signal_close"),
+            max_entry_wait_bars_ltf=d.get("max_entry_wait_bars_ltf", 50),
+            tp_levels=[TPLevel.from_dict(t) for t in d.get("tp_levels", [])],
+            sl_after_tp1=d.get("sl_after_tp1"),
+            max_bars_open=d.get("max_bars_open"),
+            fee_bps=d.get("fee_bps", 0.0),
+            risk_pct=d.get("risk_pct", 1.0),
         )
 
 
@@ -252,9 +383,23 @@ def evaluate_conditions(
     If a detector is not in the registry or returns insufficient_data,
     all conditions on it evaluate to False.
     """
+    return evaluate_conditions_on_slice(rule.conditions, slice_df, registry)
+
+
+def evaluate_conditions_on_slice(
+    conditions: list[Condition],
+    slice_df,
+    registry: dict,
+) -> tuple[bool, dict[str, dict]]:
+    """
+    Evaluate a list of Conditions against slice_df.
+
+    Each detector is called at most once (cached by name).
+    Returns (all_passed, {detector_name: result_dict}).
+    """
     cache: dict[str, dict] = {}
 
-    for cond in rule.conditions:
+    for cond in conditions:
         det_name = cond.detector
 
         # Fetch or reuse cached result
