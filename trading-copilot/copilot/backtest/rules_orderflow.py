@@ -22,9 +22,11 @@ from copilot.backtest.rules import Condition, SetupRule
 # Group A — VP Context Filters
 # ---------------------------------------------------------------------------
 
-# Rule A1: OB inside HVN long
-# Bullish MS + BOS + FVG + unmitigated bullish OB that sits inside an HVN.
-# VP confirms the OB zone has historical volume acceptance — double structural backing.
+# Rule A1: Sponsored Candle inside HVN long
+# Bullish MS + BOS + FVG + unmitigated bullish Sponsored Candle (OB that swept liquidity)
+# that sits inside an HVN.
+# VP confirms the SC zone has historical volume acceptance — double structural backing.
+# Note: classic OB not used per trading rules — only Sponsored Candle (SC = OB + sweep).
 _ob_in_hvn_long = SetupRule(
     name="ob_in_hvn_long",
     direction="long",
@@ -34,8 +36,9 @@ _ob_in_hvn_long = SetupRule(
         Condition("detect_bos", "type", "not_in", ["none"]),
         Condition("detect_fvg", "count_active", "gt", 0),
         Condition("detect_fvg", "fvgs.0.type", "eq", "bullish"),
-        Condition("detect_order_block", "obs.0.type", "eq", "bullish"),
-        Condition("detect_order_block", "obs.0.is_mitigated", "false"),
+        Condition("detect_sponsored_candle", "count", "gt", 0),
+        Condition("detect_sponsored_candle", "candles.0.ob_type", "eq", "bullish"),
+        Condition("detect_sponsored_candle", "candles.0.is_mitigated", "false"),
         Condition("check_ob_in_hvn", "in_hvn", "true"),
     ],
     entry_after="fvg_ce",
@@ -156,9 +159,10 @@ _bos_cd_confluence_long = SetupRule(
     required_session=None,
 )
 
-# Rule B3: CD bearish divergence + OB short
+# Rule B3: CD bearish divergence + Sponsored Candle short
 # CD bearish divergence (price new high, CD falling) = momentum exhaustion signal.
-# Context: bearish/ranging MS + bearish OB + bearish BOS confirms the reversal.
+# Context: bearish/ranging MS + bearish Sponsored Candle (SC = OB that swept liq) + bearish BOS.
+# Note: classic OB not used per trading rules — only Sponsored Candle.
 _cd_divergence_ob_short = SetupRule(
     name="cd_divergence_ob_short",
     direction="short",
@@ -166,8 +170,9 @@ _cd_divergence_ob_short = SetupRule(
         Condition("detect_market_structure", "state", "in", ["bearish", "ranging"]),
         Condition("detect_bos", "direction", "eq", "bearish"),
         Condition("detect_bos", "type", "not_in", ["none"]),
-        Condition("detect_order_block", "obs.0.type", "eq", "bearish"),
-        Condition("detect_order_block", "obs.0.is_mitigated", "false"),
+        Condition("detect_sponsored_candle", "count", "gt", 0),
+        Condition("detect_sponsored_candle", "candles.0.ob_type", "eq", "bearish"),
+        Condition("detect_sponsored_candle", "candles.0.is_mitigated", "false"),
         # CD divergence: price rising, delta falling = buyers running out
         Condition("detect_cumulative_delta", "divergences.0.type", "eq", "bearish"),
     ],
@@ -252,12 +257,4 @@ ORDERFLOW_RULES: dict[str, SetupRule] = {
     "cd_divergence_ob_short": _cd_divergence_ob_short,
     # Group C — Combined VP + CD
     "sponsored_cd_ob_hvn_long": _sponsored_cd_ob_hvn_long,
-    "compression_vp_break_long": _compression_vp_break_long,
-}
-
-# Convenience: rules grouped by category for --group A/B/C in compare command
-ORDERFLOW_GROUPS: dict[str, list[str]] = {
-    "A": ["ob_in_hvn_long", "poc_discount_bos_long", "lvn_acceleration_long", "vah_rejection_short"],
-    "B": ["sweep_cd_manipulation_long", "bos_cd_confluence_long", "cd_divergence_ob_short"],
-    "C": ["sponsored_cd_ob_hvn_long", "compression_vp_break_long"],
-}
+    "compression_vp_break_lon

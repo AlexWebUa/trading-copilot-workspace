@@ -1,7 +1,12 @@
 {
   "permissions": {
     "allow": [
-      "Bash(git checkout *)"
+      "Bash(git checkout *)",
+      "Bash(python -m pytest tests/test_journal.py tests/ -x -q)",
+      "Bash(python -m pytest tests/test_backtest_rules.py tests/test_backtest_simulate.py tests/test_backtest_engine.py -x -q)",
+      "Bash(python -m pytest -x -q)",
+      "Bash(python -m pytest tests/test_data_binance.py -v)",
+      "Bash(python -m pytest tests/ -q)"
     ]
   }
 }

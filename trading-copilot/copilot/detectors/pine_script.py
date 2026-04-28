@@ -90,7 +90,7 @@ def generate_pine_script(
     }
     with ThreadPoolExecutor(max_workers=len(_detector_tasks)) as _ex:
         _futures = {k: _ex.submit(fn, df) for k, fn in _detector_tasks.items()}
-        _results = {k: f.result() for k, f in _futures.items()}
+        _results = {k: f.result(timeout=30) for k, f in _futures.items()}
 
     fvgs        = _results["fvgs"]
     obs         = _results["obs"]

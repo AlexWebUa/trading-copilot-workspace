@@ -18,6 +18,9 @@ import pandas as pd
 from copilot.backtest.engine import BacktestEngine, BacktestSummary, _needs_delta
 from copilot.backtest.rules import SetupRule
 
+import logging
+logger = logging.getLogger(__name__)
+
 
 # ---------------------------------------------------------------------------
 # ComparisonRow
@@ -310,7 +313,7 @@ def _fetch_shared_df(
             from copilot.data.binance import fetch_ohlcv_with_delta
             return fetch_ohlcv_with_delta(symbol, tf, bars, market="futures")
         except Exception:
-            pass
+            logger.warning("Delta fetch failed for %s/%s; falling back to standard OHLCV", symbol, tf, exc_info=True)
 
     from copilot.data.binance import BinanceSource
     src = BinanceSource()

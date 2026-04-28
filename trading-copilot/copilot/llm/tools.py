@@ -15,10 +15,13 @@ from __future__ import annotations
 
 import importlib
 import json
+import logging
 import pkgutil
 from typing import Any, Callable
 
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 import copilot.detectors as _detectors_pkg
 from copilot.data.binance import BinanceSource, fetch_multi_tf, fetch_ohlcv_with_delta
@@ -97,10 +100,12 @@ class ToolRegistry:
             try:
                 df = fetch_ohlcv_with_delta(symbol, tf, bars)
             except Exception as e:
+                logger.exception("Delta data fetch failed for %s/%s", symbol, tf)
                 return {"error": f"Delta data fetch failed for {symbol}/{tf}: {e}"}
             try:
                 result = fn(df, **kwargs)
             except Exception as e:
+                logger.exception("Detector %r raised", tool_name)
                 return {"error": f"Detector {tool_name} raised: {e}"}
             self._result_cache[cache_key] = result
             return result
@@ -108,6 +113,7 @@ class ToolRegistry:
         try:
             df = self._source.get_ohlc(symbol, tf, bars)
         except Exception as e:
+            logger.exception("Data fetch failed for %s/%s", symbol, tf)
             return {"error": f"Data fetch failed for {symbol}/{tf}: {e}"}
 
         # Some tools (e.g. generate_pine_script) need symbol/tf for output labelling
@@ -118,6 +124,7 @@ class ToolRegistry:
         try:
             result = fn(df, **kwargs)
         except Exception as e:
+            logger.exception("Detector %r raised", tool_name)
             return {"error": f"Detector {tool_name} raised: {e}"}
         self._result_cache[cache_key] = result
         return result

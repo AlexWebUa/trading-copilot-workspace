@@ -40,9 +40,12 @@ REPL commands:
 from __future__ import annotations
 
 import argparse
+import logging
 import shlex
 import os
 import sys
+
+logger = logging.getLogger(__name__)
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -390,6 +393,7 @@ def _do_backtest(rest: str, default_symbol: str) -> None:
         else:
             print_summary(result)
     except Exception as e:
+        logger.exception("Backtest error for rule %s / %s", getattr(rule, 'name', '?'), symbol)
         print(f"  Backtest error: {e}")
 
 

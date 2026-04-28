@@ -9,8 +9,11 @@ as JSON text columns.
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 from copilot.journal.record import TradeRecord
 
@@ -86,7 +89,8 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
                 conn.execute(stmt)
                 conn.commit()
             except Exception:
-                pass
+                logger.exception("Migration failed for statement: %s", stmt)
+                raise
 
 
 # ---------------------------------------------------------------------------
@@ -107,5 +111,6 @@ def _row_to_record(row: sqlite3.Row) -> TradeRecord:
         try:
             d[key] = json.loads(raw) if raw else []
         except (TypeError, json.JSONDecodeError):
+            logger.warning("Failed to deserialise field %r for record id=%r; defaulting to []", key, d.get("id"))
             d[key] = []
     return TradeRecord.from_dict(d)
