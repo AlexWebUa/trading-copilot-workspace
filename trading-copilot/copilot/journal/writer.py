@@ -1,52 +1,56 @@
 """
-Journal persistence: append-only JSONL, in-place record updates.
+Journal persistence: SQLite-backed record storage (WAL mode).
 """
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
+from copilot.journal.db import _DB_PATH, get_connection, _record_to_row
 from copilot.journal.record import TradeRecord
-
-_DEFAULT_PATH = Path.home() / ".trading-copilot" / "journal" / "journal.jsonl"
 
 
 def default_journal_path() -> Path:
-    return _DEFAULT_PATH
+    return _DB_PATH
 
 
 def append_record(record: TradeRecord, path: Path | None = None) -> Path:
-    p = path or _DEFAULT_PATH
-    p.parent.mkdir(parents=True, exist_ok=True)
-    with p.open("a", encoding="utf-8") as f:
-        f.write(json.dumps(record.to_dict(), ensure_ascii=False) + "\n")
-    return p
+    conn = get_connection(path)
+    row = _record_to_row(record)
+    cols = ", ".join(row.keys())
+    placeholders = ", ".join("?" for _ in row)
+    conn.execute(
+        f"INSERT OR IGNORE INTO trades ({cols}) VALUES ({placeholders})",
+        list(row.values()),
+    )
+    conn.commit()
+    conn.close()
+    return path or _DB_PATH
 
 
 def update_record(record_id: str, updates: dict, path: Path | None = None) -> bool:
-    """Rewrite journal file with one record patched. Returns True if found."""
-    p = path or _DEFAULT_PATH
-    if not p.exists():
+    """Update fields of an existing record. Returns True if found."""
+    conn = get_connection(path)
+    from copilot.journal.db import _LIST_FIELDS
+    import json
+
+    serialised = {}
+    for k, v in updates.items():
+        if k in _LIST_FIELDS:
+            serialised[k] = json.dumps(v or [], ensure_ascii=False)
+        else:
+            serialised[k] = v
+
+    if not serialised:
+        conn.close()
         return False
 
-    lines = p.read_text(encoding="utf-8").splitlines()
-    found = False
-    new_lines: list[str] = []
-    for line in lines:
-        stripped = line.strip()
-        if not stripped:
-            continue
-        try:
-            d = json.loads(stripped)
-        except json.JSONDecodeError:
-            new_lines.append(stripped)
-            continue
-        if d.get("id") == record_id:
-            d.update(updates)
-            found = True
-        new_lines.append(json.dumps(d, ensure_ascii=False))
-
-    if found:
-        p.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+    set_clause = ", ".join(f"{k} = ?" for k in serialised)
+    cur = conn.execute(
+        f"UPDATE trades SET {set_clause} WHERE id = ?",
+        [*serialised.values(), record_id],
+    )
+    conn.commit()
+    found = cur.rowcount > 0
+    conn.close()
     return found

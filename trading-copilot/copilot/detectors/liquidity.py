@@ -115,8 +115,6 @@ def detect_liquidity(
 
 def _count_touches(prices: np.ndarray, level: float, tol: float, idx: int, is_high: bool = True) -> int:
     """Count bars where price came within tolerance of the level."""
-    if is_high:
-        return int((np.abs(prices - level) <= tol).sum())
     return int((np.abs(prices - level) <= tol).sum())
 
 

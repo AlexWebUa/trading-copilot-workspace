@@ -1,16 +1,15 @@
 """
 Volume Profile (VP) detector — OHLCV approximation.
 
-Distributes each bar's volume uniformly across its [low, high] price range
-into N price buckets, then identifies:
+Distributes each bar's volume across its [low, high] price range using a
+triangular distribution peaked at the close price, then identifies:
   - POC  : bucket with the highest volume (Point of Control)
   - VA   : Value Area — smallest set of buckets covering 70% of volume
   - HVN  : High Volume Nodes — local volume peaks (price acceptance zones)
   - LVN  : Low Volume Nodes — local volume troughs (price rejection zones)
 
-Accuracy note: the uniform-distribution assumption means HVN/LVN are
-approximations. They are useful as filters for POI quality (OB in HVN =
-stronger structural support; LVN on path to target = price accelerates).
+The triangular distribution weights volume toward the close, improving POC
+accuracy over the naive uniform-overlap approach.
 """
 
 from __future__ import annotations
@@ -58,6 +57,39 @@ TOOL_SCHEMA = {
 }
 
 
+def _triangular_weight(low: float, high: float, close: float, blo: float, bhi: float) -> float:
+    """
+    Fraction of a triangular PDF on [low, high] peaked at close that falls
+    within [blo, bhi].  Returns a value in [0, 1]; the caller multiplies by volume.
+    """
+    span = high - low
+    if span < 1e-12:
+        return 1.0 if blo <= low <= bhi else 0.0
+
+    # Clamp peak to [low, high]
+    c = max(low, min(high, close))
+
+    # Intersect bucket with bar range
+    lo = max(blo, low)
+    hi = min(bhi, high)
+    if hi <= lo:
+        return 0.0
+
+    def _cdf(x: float) -> float:
+        """CDF of triangular distribution at x (clamped to [low, high])."""
+        x = max(low, min(high, x))
+        if x <= c:
+            # Rising side: F(x) = (x - low)^2 / (span * (c - low)) if c > low else 0
+            base = c - low
+            return ((x - low) ** 2 / (span * base)) if base > 1e-12 else 0.0
+        else:
+            # Falling side: F(x) = 1 - (high - x)^2 / (span * (high - c))
+            base = high - c
+            return (1.0 - (high - x) ** 2 / (span * base)) if base > 1e-12 else 1.0
+
+    return max(0.0, _cdf(hi) - _cdf(lo))
+
+
 def detect_volume_profile(
     df: pd.DataFrame,
     resolution_pct: float = 0.1,
@@ -87,6 +119,7 @@ def detect_volume_profile(
     for _, row in ohlcv.iterrows():
         bar_lo = float(row["low"])
         bar_hi = float(row["high"])
+        bar_cl = float(row["close"])
         bar_vol = float(row["volume"])
         bar_range = bar_hi - bar_lo
 
@@ -101,9 +134,9 @@ def detect_volume_profile(
         for b in range(b_start, b_end + 1):
             bkt_lo = price_low + b * bucket_width
             bkt_hi = bkt_lo + bucket_width
-            overlap = min(bar_hi, bkt_hi) - max(bar_lo, bkt_lo)
-            if overlap > 0:
-                volumes[b] += bar_vol * overlap / bar_range
+            weight = _triangular_weight(bar_lo, bar_hi, bar_cl, bkt_lo, bkt_hi)
+            if weight > 0:
+                volumes[b] += bar_vol * weight
 
     total_vol = sum(volumes)
     if total_vol < 1e-10:

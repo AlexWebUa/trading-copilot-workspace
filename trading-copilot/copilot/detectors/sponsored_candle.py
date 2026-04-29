@@ -64,7 +64,7 @@ def detect_sponsored_candle(
             "status": "insufficient_data",
             "needed": 10,
             "got": len(df),
-            "sponsored": [],
+            "candles": [],
             "count": 0,
         }
 
@@ -102,7 +102,7 @@ def detect_sponsored_candle(
             is_mitigated = len(future_lows) > 0 and bool((future_lows <= midpoint).any())
 
             sponsored.append({
-                "type": "bullish",
+                "ob_type": "bullish",
                 "high": round(ob_high, 2),
                 "low": round(ob_low, 2),
                 "formed_ts": tss[i].isoformat(),
@@ -133,7 +133,7 @@ def detect_sponsored_candle(
             is_mitigated = len(future_highs) > 0 and bool((future_highs >= midpoint).any())
 
             sponsored.append({
-                "type": "bearish",
+                "ob_type": "bearish",
                 "high": round(ob_high, 2),
                 "low": round(ob_low, 2),
                 "formed_ts": tss[i].isoformat(),
@@ -146,7 +146,7 @@ def detect_sponsored_candle(
     # Unmitigated first, then recency
     sponsored.sort(key=lambda x: (x["is_mitigated"], x["age_bars"]))
     result = sponsored[:max_results]
-    return {"sponsored": result, "count": len(result)}
+    return {"candles": result, "count": len(result)}
 
 
 def _find_sweep(

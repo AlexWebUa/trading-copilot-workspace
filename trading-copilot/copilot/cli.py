@@ -313,6 +313,11 @@ def _do_backtest(rest: str, default_symbol: str) -> None:
     parser.add_argument("--end", default=None)
     parser.add_argument("--no-write", action="store_true", dest="no_write")
     parser.add_argument("--list-rules", action="store_true", dest="list_rules")
+    parser.add_argument(
+        "--split", type=float, default=None, dest="split",
+        metavar="RATIO",
+        help="Walk-forward split ratio (e.g. 0.7 = 70%% in-sample, 30%% out-of-sample)",
+    )
 
     try:
         args = parser.parse_args(shlex.split(rest) if rest else [])
@@ -364,7 +369,11 @@ def _do_backtest(rest: str, default_symbol: str) -> None:
 
     try:
         engine = BacktestEngine(source=BinanceSource())
-        summary = engine.run(
+        split = getattr(args, "split", None)
+        if split is not None and not (0.0 < split < 1.0):
+            print("  --split must be between 0 and 1 (e.g. 0.7 for 70% in-sample)")
+            return
+        result = engine.run(
             symbol=symbol,
             tf=args.tf,
             rule=rule,
@@ -372,8 +381,14 @@ def _do_backtest(rest: str, default_symbol: str) -> None:
             start=args.start,
             end=args.end,
             write_journal=not args.no_write,
+            walkforward_split=split,
         )
-        print_summary(summary)
+        from copilot.backtest.engine import WalkForwardSummary
+        if isinstance(result, WalkForwardSummary):
+            from copilot.backtest.report import print_walkforward
+            print_walkforward(result)
+        else:
+            print_summary(result)
     except Exception as e:
         print(f"  Backtest error: {e}")
 

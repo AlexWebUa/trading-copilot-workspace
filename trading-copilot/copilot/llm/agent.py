@@ -25,7 +25,9 @@ from copilot.detectors.sessions import current_killzone
 from copilot.kb.selector import KBSelector
 from copilot.llm.prompts import build_system_prompt
 from copilot.llm.report import save_report
+from copilot.llm.state import build_context_block, load_state, save_state
 from copilot.llm.tools import ToolRegistry
+from copilot.llm.trace import write_trace
 
 MAX_TURNS = 12
 DEFAULT_MODEL = "claude-sonnet-4-6"
@@ -61,9 +63,18 @@ class TradingAgent:
         """
         core_notes, query_notes = self._kb.select_for_query(user_query)
         session_ctx = current_killzone()
-        system = build_system_prompt(core_notes, query_notes, self.symbol, session_ctx)
+
+        # Inject pre-computed diff from last analysis (computed at end of last run)
+        prev_state = load_state(self.symbol)
+        prev_context: str | None = (prev_state or {}).get("context_block") or None
+
+        system = build_system_prompt(
+            core_notes, query_notes, self.symbol, session_ctx, prev_context
+        )
 
         self._messages.append({"role": "user", "content": user_query})
+
+        all_tool_results: dict[str, Any] = {}
 
         for turn in range(MAX_TURNS):
             if verbose:
@@ -86,8 +97,10 @@ class TradingAgent:
                     "role": "assistant",
                     "content": final_text,
                 })
-                # Persist
+                # Persist report and analysis state
                 saved = save_report(self.symbol, final_text)
+                if all_tool_results:
+                    save_state(self.symbol, all_tool_results)
                 if verbose:
                     print(f"  [saved] {saved}", file=sys.stderr)
                 return final_text
@@ -99,6 +112,8 @@ class TradingAgent:
                     if verbose:
                         print(f"  [tool] {block.name}({json.dumps(block.input, ensure_ascii=False)[:120]})", file=sys.stderr)
                     result = self._registry.dispatch(block.name, block.input)
+                    write_trace(self.symbol, block.name, block.input, result)
+                    all_tool_results[block.name] = result
                     tool_results.append({
                         "type": "tool_result",
                         "tool_use_id": block.id,

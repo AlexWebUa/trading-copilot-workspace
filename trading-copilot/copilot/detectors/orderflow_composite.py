@@ -60,8 +60,8 @@ def check_ob_in_hvn(
             break
 
     if target_ob is None:
-        # Fallback: use first OB regardless
-        target_ob = ob_result["obs"][0]
+        # No unmitigated OB — the zone has already been visited, so HVN backing is irrelevant
+        return {"in_hvn": False, "overlap_pct": 0.0, "hvn_price_mid": None}
 
     ob_low = float(target_ob.get("low", 0.0))
     ob_high = float(target_ob.get("high", ob_low))

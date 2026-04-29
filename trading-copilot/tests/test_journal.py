@@ -4,7 +4,6 @@ Tests for the trade journal: record serialization, writer, reader, filter, updat
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -57,6 +56,7 @@ def test_to_dict_contains_all_keys():
         "direction", "entry_price", "sl_price", "tp_prices", "exit_price",
         "result", "pnl_r", "rr_planned", "session", "killzone",
         "day_of_week", "htf_bias", "notes", "report_path", "tags",
+        "partial_exits",
     }
     assert expected_keys == set(d.keys())
 
@@ -154,33 +154,33 @@ def test_parse_ts_short_format():
 # ---------------------------------------------------------------------------
 
 def test_append_record_creates_file(tmp_path):
-    p = tmp_path / "journal.jsonl"
+    p = tmp_path / "journal.db"
     r = _make_record()
     returned = append_record(r, path=p)
     assert returned == p
     assert p.exists()
 
 
-def test_append_record_writes_valid_json(tmp_path):
-    p = tmp_path / "journal.jsonl"
+def test_append_record_roundtrip(tmp_path):
+    p = tmp_path / "journal.db"
     r = _make_record()
     append_record(r, path=p)
-    line = p.read_text(encoding="utf-8").strip()
-    d = json.loads(line)
-    assert d["symbol"] == "BTCUSDT"
-    assert d["setup_name"] == "1h3m"
+    records = load_all(path=p)
+    assert len(records) == 1
+    assert records[0].symbol == "BTCUSDT"
+    assert records[0].setup_name == "1h3m"
 
 
 def test_append_multiple_records(tmp_path):
-    p = tmp_path / "journal.jsonl"
+    p = tmp_path / "journal.db"
     for i in range(3):
         append_record(_make_record(setup_name=f"setup_{i}"), path=p)
-    lines = [l for l in p.read_text(encoding="utf-8").splitlines() if l.strip()]
-    assert len(lines) == 3
+    records = load_all(path=p)
+    assert len(records) == 3
 
 
 def test_update_record_modifies_result(tmp_path):
-    p = tmp_path / "journal.jsonl"
+    p = tmp_path / "journal.db"
     r = _make_record(result="pending")
     append_record(r, path=p)
     found = update_record(r.id, {"result": "win", "pnl_r": 1.75}, path=p)
@@ -191,7 +191,7 @@ def test_update_record_modifies_result(tmp_path):
 
 
 def test_update_record_not_found(tmp_path):
-    p = tmp_path / "journal.jsonl"
+    p = tmp_path / "journal.db"
     append_record(_make_record(), path=p)
     found = update_record("nonexistent-id", {"result": "win"}, path=p)
     assert found is False
@@ -202,7 +202,7 @@ def test_update_record_not_found(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_load_all_empty_journal(tmp_path):
-    p = tmp_path / "journal.jsonl"
+    p = tmp_path / "journal.db"
     assert load_all(path=p) == []
 
 
@@ -212,7 +212,7 @@ def test_load_all_missing_file(tmp_path):
 
 
 def test_load_all_reads_records(tmp_path):
-    p = tmp_path / "journal.jsonl"
+    p = tmp_path / "journal.db"
     r1 = _make_record(setup_name="1h3m")
     r2 = _make_record(setup_name="silver_bullet", direction="short")
     append_record(r1, path=p)
@@ -223,18 +223,9 @@ def test_load_all_reads_records(tmp_path):
     assert records[1].direction == "short"
 
 
-def test_load_all_skips_malformed_lines(tmp_path):
-    p = tmp_path / "journal.jsonl"
-    r = _make_record()
-    append_record(r, path=p)
-    with p.open("a", encoding="utf-8") as f:
-        f.write("not json at all\n")
-    records = load_all(path=p)
-    assert len(records) == 1  # malformed line silently skipped
-
 
 def test_filter_by_result(tmp_path):
-    p = tmp_path / "journal.jsonl"
+    p = tmp_path / "journal.db"
     append_record(_make_record(result="win"), path=p)
     append_record(_make_record(result="loss"), path=p)
     append_record(_make_record(result="win"), path=p)
@@ -244,7 +235,7 @@ def test_filter_by_result(tmp_path):
 
 
 def test_filter_by_setup(tmp_path):
-    p = tmp_path / "journal.jsonl"
+    p = tmp_path / "journal.db"
     append_record(_make_record(setup_name="1h3m"), path=p)
     append_record(_make_record(setup_name="silver_bullet"), path=p)
     results = filter_by(path=p, setup_name="1h3m")
@@ -253,7 +244,7 @@ def test_filter_by_setup(tmp_path):
 
 
 def test_filter_by_last(tmp_path):
-    p = tmp_path / "journal.jsonl"
+    p = tmp_path / "journal.db"
     for i in range(5):
         append_record(_make_record(setup_name=f"s{i}"), path=p)
     last3 = filter_by(path=p, last=3)
@@ -262,7 +253,7 @@ def test_filter_by_last(tmp_path):
 
 
 def test_filter_by_tag(tmp_path):
-    p = tmp_path / "journal.jsonl"
+    p = tmp_path / "journal.db"
     append_record(_make_record(tags=["kyiv", "clean"]), path=p)
     append_record(_make_record(tags=["kyiv"]), path=p)
     append_record(_make_record(tags=["other"]), path=p)
@@ -271,7 +262,7 @@ def test_filter_by_tag(tmp_path):
 
 
 def test_filter_by_symbol_case_insensitive(tmp_path):
-    p = tmp_path / "journal.jsonl"
+    p = tmp_path / "journal.db"
     append_record(_make_record(symbol="BTCUSDT"), path=p)
     append_record(_make_record(symbol="ETHUSDT"), path=p)
     results = filter_by(path=p, symbol="btcusdt")
@@ -279,7 +270,7 @@ def test_filter_by_symbol_case_insensitive(tmp_path):
 
 
 def test_get_by_id_found(tmp_path):
-    p = tmp_path / "journal.jsonl"
+    p = tmp_path / "journal.db"
     r = _make_record()
     append_record(r, path=p)
     found = get_by_id(r.id, path=p)
@@ -288,7 +279,7 @@ def test_get_by_id_found(tmp_path):
 
 
 def test_get_by_id_partial_prefix(tmp_path):
-    p = tmp_path / "journal.jsonl"
+    p = tmp_path / "journal.db"
     r = _make_record()
     append_record(r, path=p)
     found = get_by_id(r.id[:8], path=p)
@@ -297,6 +288,6 @@ def test_get_by_id_partial_prefix(tmp_path):
 
 
 def test_get_by_id_not_found(tmp_path):
-    p = tmp_path / "journal.jsonl"
+    p = tmp_path / "journal.db"
     append_record(_make_record(), path=p)
     assert get_by_id("00000000", path=p) is None

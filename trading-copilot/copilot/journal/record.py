@@ -43,6 +43,8 @@ class TradeRecord:
     htf_bias: str = ""
     notes: str = ""
     report_path: str | None = None
+    partial_exits: list[dict] = field(default_factory=list)
+    # Each entry: {"size_pct": float, "exit_price": float, "exit_ts": str, "pnl_r": float}
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -71,6 +73,7 @@ class TradeRecord:
             "notes": self.notes,
             "report_path": self.report_path,
             "tags": self.tags,
+            "partial_exits": self.partial_exits,
         }
 
     @classmethod

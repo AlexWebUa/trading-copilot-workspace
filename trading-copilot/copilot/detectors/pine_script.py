@@ -25,6 +25,7 @@ Zone color legend:
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 import pandas as pd
@@ -37,6 +38,7 @@ from copilot.detectors.liquidity import detect_liquidity
 from copilot.detectors.mitigation_block import detect_mitigation_block
 from copilot.detectors.order_block import detect_order_block
 from copilot.detectors.rejection_block import detect_rejection_block
+from copilot.detectors.volume_profile import detect_volume_profile
 
 TOOL_SCHEMA = {
     "name": "generate_pine_script",
@@ -74,15 +76,31 @@ def generate_pine_script(
     future_bars: int = 50,
 ) -> dict:
     """Run all detectors and emit a Pine Script v5 overlay."""
-    # ── Run detectors ────────────────────────────────────────────────────────
-    fvgs       = detect_fvg(df)
-    obs        = detect_order_block(df)
-    liq        = detect_liquidity(df)
-    bos        = detect_bos(df)
-    ifvgs      = detect_ifvg(df)
-    breakers   = detect_breaker_block(df)
-    rejections = detect_rejection_block(df)
-    mitigations = detect_mitigation_block(df)
+    # ── Run detectors in parallel ────────────────────────────────────────────
+    _detector_tasks = {
+        "fvgs":        detect_fvg,
+        "obs":         detect_order_block,
+        "liq":         detect_liquidity,
+        "bos":         detect_bos,
+        "ifvgs":       detect_ifvg,
+        "breakers":    detect_breaker_block,
+        "rejections":  detect_rejection_block,
+        "mitigations": detect_mitigation_block,
+        "vp":          detect_volume_profile,
+    }
+    with ThreadPoolExecutor(max_workers=len(_detector_tasks)) as _ex:
+        _futures = {k: _ex.submit(fn, df) for k, fn in _detector_tasks.items()}
+        _results = {k: f.result() for k, f in _futures.items()}
+
+    fvgs        = _results["fvgs"]
+    obs         = _results["obs"]
+    liq         = _results["liq"]
+    bos         = _results["bos"]
+    ifvgs       = _results["ifvgs"]
+    breakers    = _results["breakers"]
+    rejections  = _results["rejections"]
+    mitigations = _results["mitigations"]
+    vp          = _results["vp"]
 
     # ── Compute TF bar duration for sweep age calculation ────────────────────
     tf_seconds = float((df.index[1] - df.index[0]).total_seconds()) if len(df) > 1 else 3600.0
@@ -113,8 +131,87 @@ def generate_pine_script(
         "c_bsl       = color.new(color.yellow,   0)",
         "c_ssl       = color.new(color.purple,   0)",
         "",
-        "if barstate.islast",
     ]
+
+    # ── alertcondition() calls — run on every bar (outside barstate.islast) ──
+    _alert_lines: list[str] = ["// ── Alert conditions ──────────────────────────────────────────────"]
+    _alert_count = 0
+
+    # BSL sweeps — wick crosses above the level
+    for pool in liq.get("buyside_liquidity", [])[:5]:
+        lvl = pool.get("price")
+        if lvl is None:
+            continue
+        _alert_lines.append(
+            f'alertcondition(ta.crossover(high, {lvl}), "BSL Sweep {lvl}", "Price swept BSL at {lvl}")'
+        )
+        _alert_count += 1
+
+    # SSL sweeps — wick crosses below the level
+    for pool in liq.get("sellside_liquidity", [])[:5]:
+        lvl = pool.get("price")
+        if lvl is None:
+            continue
+        _alert_lines.append(
+            f'alertcondition(ta.crossunder(low, {lvl}), "SSL Sweep {lvl}", "Price swept SSL at {lvl}")'
+        )
+        _alert_count += 1
+
+    # Untouched FVG entries — close enters the zone
+    for z in fvgs.get("fvgs", []):
+        if z.get("fill_state", "untouched") != "untouched":
+            continue
+        top = z["upper"]
+        bot = z["lower"]
+        ztype = z["type"]
+        arrow = "↑" if ztype == "bullish" else "↓"
+        _alert_lines.append(
+            f'alertcondition(close >= {bot} and close <= {top}, '
+            f'"FVG{arrow} Entry {bot}", "Price entered {ztype} FVG {bot}-{top}")'
+        )
+        _alert_count += 1
+
+    # Active OB touch — close inside the zone
+    for ob in obs.get("obs", []):
+        if ob.get("is_mitigated"):
+            continue
+        top = ob.get("high")
+        bot = ob.get("low")
+        if top is None or bot is None:
+            continue
+        ztype = ob.get("type", "")
+        arrow = "↑" if ztype == "bullish" else "↓"
+        _alert_lines.append(
+            f'alertcondition(close >= {bot} and close <= {top}, '
+            f'"OB{arrow} Touch {bot}", "Price touched {ztype} OB {bot}-{top}")'
+        )
+        _alert_count += 1
+
+    # VP key levels — cross
+    poc = vp.get("poc")
+    vah = vp.get("vah")
+    val = vp.get("val")
+    if poc:
+        _alert_lines.append(
+            f'alertcondition(ta.cross(close, {poc}), "POC Cross {poc}", "Price crossed POC at {poc}")'
+        )
+        _alert_count += 1
+    if vah:
+        _alert_lines.append(
+            f'alertcondition(ta.cross(close, {vah}), "VAH Cross {vah}", "Price crossed VAH at {vah}")'
+        )
+        _alert_count += 1
+    if val:
+        _alert_lines.append(
+            f'alertcondition(ta.cross(close, {val}), "VAL Cross {val}", "Price crossed VAL at {val}")'
+        )
+        _alert_count += 1
+
+    if _alert_count > 0:
+        lines += _alert_lines
+        lines.append("")
+
+    lines.append("if barstate.islast")
 
     zone_count = 0
 
