@@ -9,6 +9,7 @@ Terminology (per KB):
 Detection rule: candle CLOSE must breach the prior swing extreme (not just a wick).
 """
 
+import numpy as np
 import pandas as pd
 
 from copilot.detectors.market_structure import _find_swings
@@ -66,7 +67,7 @@ def detect_bos(df: pd.DataFrame, swing_lookback: int = 5) -> dict:
         ts = tss[i]
 
         # MSS: close breaks below the most recent swing LOW (bearish reversal signal)
-        if c < last_l["price"] and last_l["ts"] < ts:
+        if c < last_l["price"] and pd.Timestamp(last_l["ts"]) < ts:
             displacement = _count_displacement(closes, i)
             bos_event = {
                 "type": "MSS",
@@ -81,7 +82,7 @@ def detect_bos(df: pd.DataFrame, swing_lookback: int = 5) -> dict:
             break
 
         # BOS/cBOS: close breaks above the most recent swing HIGH (bullish continuation)
-        if c > last_h["price"] and last_h["ts"] < ts:
+        if c > last_h["price"] and pd.Timestamp(last_h["ts"]) < ts:
             displacement = _count_displacement(closes, i)
             bos_event = {
                 "type": "BOS" if abs(c - last_h["price"]) < 2 * atr else "cBOS",

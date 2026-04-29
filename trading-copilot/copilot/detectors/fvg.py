@@ -16,6 +16,7 @@ Fill states (per KB):
 Active FVGs only (not fully filled). Ordered newest → oldest.
 """
 
+import numpy as np
 import pandas as pd
 
 TOOL_SCHEMA = {

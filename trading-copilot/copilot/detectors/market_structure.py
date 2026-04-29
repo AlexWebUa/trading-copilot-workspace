@@ -11,6 +11,7 @@ Swing "strength": strong if the swing was followed by a BOS of the prior level;
 weak if it reversed before clearing the prior extreme.
 """
 
+import numpy as np
 import pandas as pd
 
 TOOL_SCHEMA = {
@@ -40,19 +41,31 @@ TOOL_SCHEMA = {
 
 
 def _find_swings(df: pd.DataFrame, lookback: int) -> list[dict]:
-    """Return sorted list of swing points with type/price/ts."""
+    """Return sorted list of swing points with type/price/ts. Vectorized via rolling."""
     highs = df["high"].values
     lows = df["low"].values
     tss = df.index
-    swings: list[dict] = []
+    n = len(highs)
+    win = 2 * lookback + 1
 
-    for i in range(lookback, len(df) - lookback):
-        window_h = highs[i - lookback : i + lookback + 1]
-        window_l = lows[i - lookback : i + lookback + 1]
-        if highs[i] == window_h.max():
-            swings.append({"type": "high", "price": float(highs[i]), "ts": tss[i]})
-        if lows[i] == window_l.min():
-            swings.append({"type": "low", "price": float(lows[i]), "ts": tss[i]})
+    if n < win:
+        return []
+
+    # Rolling max/min over the symmetric window using numpy stride tricks
+    roll_max_h = np.lib.stride_tricks.sliding_window_view(highs, win).max(axis=1)
+    roll_min_l = np.lib.stride_tricks.sliding_window_view(lows, win).min(axis=1)
+
+    # Pre-convert timestamps to strings once to avoid per-element pandas boxing
+    tss_str = [str(ts) for ts in tss]
+
+    # Centre index of each window corresponds to bar [lookback .. n-lookback-1]
+    swings: list[dict] = []
+    for offset in range(len(roll_max_h)):
+        i = offset + lookback
+        if highs[i] == roll_max_h[offset]:
+            swings.append({"type": "high", "price": float(highs[i]), "ts": tss_str[i]})
+        if lows[i] == roll_min_l[offset]:
+            swings.append({"type": "low", "price": float(lows[i]), "ts": tss_str[i]})
 
     swings.sort(key=lambda x: x["ts"])
     return swings
@@ -100,7 +113,7 @@ def detect_market_structure(df: pd.DataFrame, swing_lookback: int = 5) -> dict:
     l_strength = "strong" if abs(last_l["price"] - prev_l["price"]) > 0.5 * atr else "weak"
 
     # Bars since last swing
-    last_swing_ts = max(last_h["ts"], last_l["ts"])
+    last_swing_ts = pd.Timestamp(max(last_h["ts"], last_l["ts"]))
     bars_in_state = int((df.index[-1] - last_swing_ts).total_seconds() //
                         (df.index[1] - df.index[0]).total_seconds())
 
@@ -115,8 +128,10 @@ def detect_market_structure(df: pd.DataFrame, swing_lookback: int = 5) -> dict:
 
 
 def _fmt_swing(s: dict, strength: str) -> dict:
+    ts = s["ts"]
+    ts_str = ts.isoformat() if hasattr(ts, "isoformat") else str(ts)
     return {
         "price": round(s["price"], 2),
-        "ts": s["ts"].isoformat(),
+        "ts": ts_str,
         "strength": strength,
     }

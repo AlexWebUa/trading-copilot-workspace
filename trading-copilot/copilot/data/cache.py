@@ -25,6 +25,19 @@ def _cache_path(cache_dir: Path, source: str, symbol: str, tf: str, bars: int) -
     return cache_dir / f"{source}_{symbol}_{tf}_{bars}_{digest}.parquet"
 
 
+def _range_cache_path(
+    cache_dir: Path,
+    source: str,
+    symbol: str,
+    tf: str,
+    start_ms: int | None,
+    end_ms: int | None,
+) -> Path:
+    key = f"{source}/{symbol}/{tf}/{start_ms}/{end_ms}"
+    digest = hashlib.md5(key.encode()).hexdigest()[:12]
+    return cache_dir / f"{source}_{symbol}_{tf}_range_{digest}.parquet"
+
+
 class OHLCCache:
     def __init__(
         self,
@@ -58,3 +71,36 @@ class OHLCCache:
         path = _cache_path(self._dir, source, symbol, tf, bars)
         if path.exists():
             path.unlink()
+
+    def get_range(
+        self,
+        source: str,
+        symbol: str,
+        tf: str,
+        start_ms: int | None,
+        end_ms: int | None,
+    ) -> pd.DataFrame | None:
+        path = _range_cache_path(self._dir, source, symbol, tf, start_ms, end_ms)
+        if not path.exists():
+            return None
+        # Historical ranges are immutable — 24h TTL is generous
+        age = time.time() - path.stat().st_mtime
+        if age > 86400:
+            return None
+        df = pd.read_parquet(path)
+        if df.index.tz is None:
+            df.index = df.index.tz_localize("UTC")
+        return df
+
+    def put_range(
+        self,
+        source: str,
+        symbol: str,
+        tf: str,
+        start_ms: int | None,
+        end_ms: int | None,
+        df: pd.DataFrame,
+    ) -> None:
+        validate(df)
+        path = _range_cache_path(self._dir, source, symbol, tf, start_ms, end_ms)
+        df.to_parquet(path)

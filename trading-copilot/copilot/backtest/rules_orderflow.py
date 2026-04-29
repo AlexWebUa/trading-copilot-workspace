@@ -257,4 +257,12 @@ ORDERFLOW_RULES: dict[str, SetupRule] = {
     "cd_divergence_ob_short": _cd_divergence_ob_short,
     # Group C — Combined VP + CD
     "sponsored_cd_ob_hvn_long": _sponsored_cd_ob_hvn_long,
-    "compression_vp_break_lon
+    "compression_vp_break_long": _compression_vp_break_long,
+}
+
+# Convenience: rules grouped by category for --group A/B/C in compare command
+ORDERFLOW_GROUPS: dict[str, list[str]] = {
+    "A": ["ob_in_hvn_long", "poc_discount_bos_long", "lvn_acceleration_long", "vah_rejection_short"],
+    "B": ["sweep_cd_manipulation_long", "bos_cd_confluence_long", "cd_divergence_ob_short"],
+    "C": ["sponsored_cd_ob_hvn_long", "compression_vp_break_long"],
+}

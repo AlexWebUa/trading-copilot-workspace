@@ -14,6 +14,7 @@ State:
   mitigated   : price touched the OB zone (≥50% of zone body visited)
 """
 
+import numpy as np
 import pandas as pd
 
 from copilot.detectors.fvg import detect_fvg

@@ -61,6 +61,23 @@ class ToolRegistry:
                     f"Module copilot.detectors.{module_info.name} defines TOOL_SCHEMA "
                     f"with name='{fn_name}' but no function by that name was found."
                 )
+            # Inject time-range params into every data-fetching tool schema
+            if fn_name not in _NO_DF_TOOLS:
+                props = schema.setdefault("input_schema", {}).setdefault("properties", {})
+                props.setdefault("start_time", {
+                    "type": "string",
+                    "description": (
+                        "Start of historical range (ISO 8601, e.g. '2025-11-24T12:00:00'). "
+                        "UTC assumed if no timezone. Overrides 'bars' when provided."
+                    ),
+                })
+                props.setdefault("end_time", {
+                    "type": "string",
+                    "description": (
+                        "End of historical range (ISO 8601, e.g. '2025-11-24T13:35:00'). "
+                        "UTC assumed if no timezone. Defaults to most recent bar when omitted."
+                    ),
+                })
             self._schemas.append(schema)
             self._callables[fn_name] = fn
 
@@ -82,16 +99,16 @@ class ToolRegistry:
         symbol = tool_input.get("symbol", "BTCUSDT").upper()
         tf = tool_input.get("timeframe", "1h")
         bars = tool_input.get("bars", 500)
+        start_time = tool_input.get("start_time")
+        end_time = tool_input.get("end_time")
 
         # Build kwargs: exclude data-fetch params
-        kwargs = {
-            k: v for k, v in tool_input.items()
-            if k not in ("symbol", "timeframe", "bars")
-        }
+        _FETCH_PARAMS = {"symbol", "timeframe", "bars", "start_time", "end_time"}
+        kwargs = {k: v for k, v in tool_input.items() if k not in _FETCH_PARAMS}
 
         # Request-scoped result cache — avoids recomputing the same detector
         # within one analysis session (cleared by clear_cache() between MCP calls)
-        cache_key = (tool_name, symbol, tf, bars)
+        cache_key = (tool_name, symbol, tf, bars, start_time, end_time)
         if cache_key in self._result_cache:
             return self._result_cache[cache_key]
 
@@ -111,7 +128,7 @@ class ToolRegistry:
             return result
 
         try:
-            df = self._source.get_ohlc(symbol, tf, bars)
+            df = self._source.get_ohlc(symbol, tf, bars, start_time=start_time, end_time=end_time)
         except Exception as e:
             logger.exception("Data fetch failed for %s/%s", symbol, tf)
             return {"error": f"Data fetch failed for {symbol}/{tf}: {e}"}
