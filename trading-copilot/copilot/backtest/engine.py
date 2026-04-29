@@ -20,12 +20,15 @@ State machine:
 
 from __future__ import annotations
 
+import logging
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 from copilot.backtest.rules import (
     SetupRule,
@@ -238,7 +241,7 @@ class BacktestEngine:
                 try:
                     htf_dfs[htf_tf] = self._source.get_ohlc(symbol, htf_tf, htf_bars)
                 except Exception:
-                    pass  # HTF data unavailable → HTF conditions will fail
+                    logger.warning("HTF data unavailable for %s/%s: HTF conditions will fail", symbol, htf_tf, exc_info=True)
 
         # === Change 2: Pre-fetch LTF data ===
         _ltf_df: pd.DataFrame | None = None
@@ -247,10 +250,23 @@ class BacktestEngine:
             ltf_min = _TF_MINUTES.get(rule.entry_tf, 5)
             if ltf_min < tf_min:
                 ltf_multiplier = tf_min // ltf_min
-                ltf_bars = len(df) * ltf_multiplier + 200
+                ltf_bars_needed = len(df) * ltf_multiplier + 500
                 try:
-                    _ltf_df = self._source.get_ohlc(symbol, rule.entry_tf, ltf_bars)
+                    from copilot.data.binance import BinanceSource, fetch_ohlcv_batched
+                    if isinstance(self._source, BinanceSource):
+                        # Batched fetch handles >1500-bar requests and applies the
+                        # 100k cap with a user-visible warning if exceeded.
+                        _ltf_df = fetch_ohlcv_batched(
+                            symbol, rule.entry_tf, ltf_bars_needed,
+                            market=self._source._market,
+                        )
+                    else:
+                        # Mock / non-Binance source (e.g. tests): delegate to get_ohlc
+                        _ltf_df = self._source.get_ohlc(
+                            symbol, rule.entry_tf, ltf_bars_needed
+                        )
                 except Exception:
+                    logger.warning("LTF data unavailable for %s/%s: LTF entry will be skipped", symbol, rule.entry_tf, exc_info=True)
                     _ltf_df = None
 
         completed_trades: list[TradeRecord] = []
@@ -284,8 +300,10 @@ class BacktestEngine:
 
             # ── IN_TRADE_P2: second leg after TP1 ────────────────────────
             if state == _IN_TRADE_P2 and active_trade is not None:
-                assert current_sl_price is not None
-                assert current_tp2_price is not None
+                if current_sl_price is None:
+                    raise RuntimeError("current_sl_price is None in _IN_TRADE_P2 state — state machine invariant violated")
+                if current_tp2_price is None:
+                    raise RuntimeError("current_tp2_price is None in _IN_TRADE_P2 state — state machine invariant violated")
 
                 # Change 4: time-based exit
                 bars_elapsed = i - active_entry_bar

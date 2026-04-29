@@ -43,7 +43,7 @@ TOOL_SCHEMA = {
 def detect_liquidity(
     df: pd.DataFrame,
     tolerance_atr: float = 0.15,
-    lookback: int = 150,
+    lookback: int = 80,
     max_results: int = 6,
 ) -> dict:
     if len(df) < 10:
@@ -63,7 +63,8 @@ def detect_liquidity(
     highs = window["high"].values
     lows = window["low"].values
     closes = window["close"].values
-    tss = window.index
+    # Pre-convert timestamps to strings once (avoids per-element pandas boxing overhead)
+    tss_str = [str(ts) for ts in window.index]
 
     buyside: list[dict] = []
     sellside: list[dict] = []
@@ -77,7 +78,7 @@ def detect_liquidity(
                 "price": round(float(highs[i]), 2),
                 "type": "EQH" if touches >= 2 else "swing_high",
                 "touches": touches,
-                "last_touch_ts": tss[i].isoformat(),
+                "last_touch_ts": tss_str[i],
                 "age_bars": len(window) - 1 - i,
                 "is_swept": swept,
             })
@@ -88,7 +89,7 @@ def detect_liquidity(
                 "price": round(float(lows[i]), 2),
                 "type": "EQL" if touches >= 2 else "swing_low",
                 "touches": touches,
-                "last_touch_ts": tss[i].isoformat(),
+                "last_touch_ts": tss_str[i],
                 "age_bars": len(window) - 1 - i,
                 "is_swept": swept,
             })
@@ -119,45 +120,35 @@ def _count_touches(prices: np.ndarray, level: float, tol: float, idx: int, is_hi
 
 
 def _find_sweeps(window: pd.DataFrame, pools: list[dict], atr: float) -> list[dict]:
-    """Detect wick-only raids (wick past level, close returns)."""
-    sweeps: list[dict] = []
+    """Detect wick-only raids (wick past level, close returns). Vectorized per pool."""
+    if not pools:
+        return []
     scan = window.iloc[-30:]
     highs = scan["high"].values
     lows = scan["low"].values
     closes = scan["close"].values
-    tss = scan.index
+    # Pre-convert timestamps once
+    tss_str = [str(ts) for ts in scan.index]
+    tol = atr * 0.05
+
+    seen: set = set()
+    unique: list[dict] = []
 
     for pool in pools:
         level = pool["price"]
-        is_buy = pool in [p for p in pools if "swing_high" in p["type"] or "EQH" in p["type"]]
-        tol = atr * 0.05
-
         for i in range(len(scan) - 1):
-            # Buyside sweep: wick above level but close below
             if highs[i] > level + tol and closes[i] < level:
-                sweeps.append({
-                    "side": "buyside",
-                    "swept_level": level,
-                    "sweep_ts": tss[i].isoformat(),
-                    "closed_back": True,
-                })
-            # Sellside sweep: wick below level but close above
+                key = ("buyside", level, tss_str[i])
+                if key not in seen:
+                    seen.add(key)
+                    unique.append({"side": "buyside", "swept_level": level,
+                                   "sweep_ts": tss_str[i], "closed_back": True})
             elif lows[i] < level - tol and closes[i] > level:
-                sweeps.append({
-                    "side": "sellside",
-                    "swept_level": level,
-                    "sweep_ts": tss[i].isoformat(),
-                    "closed_back": True,
-                })
-
-    # Deduplicate by ts
-    seen = set()
-    unique = []
-    for s in sweeps:
-        key = (s["side"], s["swept_level"], s["sweep_ts"])
-        if key not in seen:
-            seen.add(key)
-            unique.append(s)
+                key = ("sellside", level, tss_str[i])
+                if key not in seen:
+                    seen.add(key)
+                    unique.append({"side": "sellside", "swept_level": level,
+                                   "sweep_ts": tss_str[i], "closed_back": True})
 
     unique.sort(key=lambda x: x["sweep_ts"], reverse=True)
     return unique

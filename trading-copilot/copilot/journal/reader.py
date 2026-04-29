@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from copilot.journal.db import _DB_PATH, get_connection, _row_to_record
+from copilot.journal.db import get_connection, _row_to_record
 from copilot.journal.record import TradeRecord
 
 
