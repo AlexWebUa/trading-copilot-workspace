@@ -19,6 +19,8 @@ Active FVGs only (not fully filled). Ordered newest → oldest.
 import numpy as np
 import pandas as pd
 
+from copilot.detectors.utils import calc_atr, detect_fvg_zone, extract_arrays
+
 TOOL_SCHEMA = {
     "name": "detect_fvg",
     "description": (
@@ -64,32 +66,19 @@ def detect_fvg(
     if len(df) < 3:
         return {"status": "insufficient_data", "needed": 3, "got": len(df), "fvgs": [], "count_active": 0}
 
-    atr = float((df["high"] - df["low"]).rolling(14).mean().iloc[-1])
+    atr = calc_atr(df)
     min_width = atr * min_width_atr
 
-    opens = df["open"].values
-    highs = df["high"].values
-    lows = df["low"].values
-    closes = df["close"].values
-    tss = df.index
+    opens, highs, lows, closes, tss = extract_arrays(df)
 
     active_fvgs: list[dict] = []
     start_i = max(0, len(df) - max_age_bars - 2)
 
     for i in range(start_i, len(df) - 2):
-        c0_high, c0_low = highs[i], lows[i]
-        c2_high, c2_low = highs[i + 2], lows[i + 2]
-
-        # Bullish FVG: gap between C0 top and C2 bottom
-        if c2_low > c0_high:
-            upper, lower = c2_low, c0_high
-            fvg_type = "bullish"
-        # Bearish FVG: gap between C0 bottom and C2 top
-        elif c2_high < c0_low:
-            upper, lower = c0_low, c2_high
-            fvg_type = "bearish"
-        else:
+        zone = detect_fvg_zone(highs, lows, i)
+        if zone is None:
             continue
+        upper, lower, fvg_type = zone
 
         width = upper - lower
         if width < min_width:

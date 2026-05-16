@@ -20,8 +20,18 @@ Detection:
   3. Return sponsored OBs that are still unmitigated.
 """
 
-import numpy as np
 import pandas as pd
+
+from copilot.detectors.utils import (
+    IMPULSE_ATR_THRESHOLD,
+    calc_atr,
+    calc_ob_zone,
+    extract_arrays,
+    find_sweep,
+    is_bearish_ob,
+    is_bullish_ob,
+    is_zone_mitigated,
+)
 
 TOOL_SCHEMA = {
     "name": "detect_sponsored_candle",
@@ -50,8 +60,6 @@ TOOL_SCHEMA = {
     },
 }
 
-_IMPULSE_ATR_THRESHOLD = 1.5
-
 
 def detect_sponsored_candle(
     df: pd.DataFrame,
@@ -68,38 +76,26 @@ def detect_sponsored_candle(
             "count": 0,
         }
 
-    atr = float((df["high"] - df["low"]).rolling(14).mean().iloc[-1])
-    opens = df["open"].values
-    highs = df["high"].values
-    lows = df["low"].values
-    closes = df["close"].values
-    tss = df.index
+    atr = calc_atr(df)
+    opens, highs, lows, closes, tss = extract_arrays(df)
 
     sponsored: list[dict] = []
     start_i = max(sweep_window + 1, len(df) - lookback - 1)
 
     for i in range(start_i, len(df) - 2):
-        impulse_range = highs[i + 1] - lows[i + 1]
-
         # ── Bullish OB: bearish candle → bullish impulse ──
-        if closes[i] < opens[i] and closes[i + 1] > highs[i] and impulse_range > _IMPULSE_ATR_THRESHOLD * atr:
-            ob_high = max(opens[i], closes[i])
-            ob_low = min(opens[i], closes[i])
+        if is_bullish_ob(closes, opens, highs, lows, i, atr):
+            ob_high, ob_low = calc_ob_zone(highs, lows, i)
 
             # Check for sellside sweep before the OB:
             # A bar where low < ob_low AND close > ob_low (wick below, closed back)
             pre_start = max(0, i - sweep_window)
-            pre_lows = lows[pre_start:i]
-            pre_closes = closes[pre_start:i]
-
-            sweep_found, sweep_bar_offset = _find_sweep(pre_lows, pre_closes, ob_low, side="sellside")
+            sweep_found, sweep_bar_offset = find_sweep(lows[pre_start:i], closes[pre_start:i], ob_low, "sellside")
 
             if not sweep_found:
                 continue  # No sponsoring sweep → not a sponsored candle
 
-            future_lows = lows[i + 2:]
-            midpoint = (ob_high + ob_low) / 2
-            is_mitigated = len(future_lows) > 0 and bool((future_lows <= midpoint).any())
+            is_mitigated = is_zone_mitigated(ob_high, ob_low, lows[i + 2:], "bullish")
 
             sponsored.append({
                 "ob_type": "bullish",
@@ -113,24 +109,18 @@ def detect_sponsored_candle(
             })
 
         # ── Bearish OB: bullish candle → bearish impulse ──
-        if closes[i] > opens[i] and closes[i + 1] < lows[i] and impulse_range > _IMPULSE_ATR_THRESHOLD * atr:
-            ob_high = max(opens[i], closes[i])
-            ob_low = min(opens[i], closes[i])
+        if is_bearish_ob(closes, opens, highs, lows, i, atr):
+            ob_high, ob_low = calc_ob_zone(highs, lows, i)
 
             # Check for buyside sweep before the OB:
             # A bar where high > ob_high AND close < ob_high (wick above, closed back)
             pre_start = max(0, i - sweep_window)
-            pre_highs = highs[pre_start:i]
-            pre_closes = closes[pre_start:i]
-
-            sweep_found, sweep_bar_offset = _find_sweep(pre_highs, pre_closes, ob_high, side="buyside")
+            sweep_found, sweep_bar_offset = find_sweep(highs[pre_start:i], closes[pre_start:i], ob_high, "buyside")
 
             if not sweep_found:
                 continue
 
-            future_highs = highs[i + 2:]
-            midpoint = (ob_high + ob_low) / 2
-            is_mitigated = len(future_highs) > 0 and bool((future_highs >= midpoint).any())
+            is_mitigated = is_zone_mitigated(ob_high, ob_low, highs[i + 2:], "bearish")
 
             sponsored.append({
                 "ob_type": "bearish",
@@ -147,24 +137,3 @@ def detect_sponsored_candle(
     sponsored.sort(key=lambda x: (x["is_mitigated"], x["age_bars"]))
     result = sponsored[:max_results]
     return {"candles": result, "count": len(result)}
-
-
-def _find_sweep(
-    wicks: np.ndarray,
-    closes: np.ndarray,
-    level: float,
-    side: str,
-) -> tuple[bool, int]:
-    """
-    Find the first bar that sweeps the given level and closes back.
-
-    Returns (found, bar_index_in_slice).
-    """
-    for j in range(len(wicks)):
-        if side == "sellside":
-            if wicks[j] < level and closes[j] > level:
-                return True, j
-        else:  # buyside
-            if wicks[j] > level and closes[j] < level:
-                return True, j
-    return False, -1

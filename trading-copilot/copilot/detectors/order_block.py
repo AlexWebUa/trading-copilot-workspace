@@ -14,10 +14,18 @@ State:
   mitigated   : price touched the OB zone (≥50% of zone body visited)
 """
 
-import numpy as np
 import pandas as pd
 
 from copilot.detectors.fvg import detect_fvg
+from copilot.detectors.utils import (
+    IMPULSE_ATR_THRESHOLD,
+    calc_atr,
+    calc_ob_zone,
+    extract_arrays,
+    is_bearish_ob,
+    is_bullish_ob,
+    is_zone_mitigated,
+)
 
 TOOL_SCHEMA = {
     "name": "detect_order_block",
@@ -45,8 +53,6 @@ TOOL_SCHEMA = {
     },
 }
 
-_IMPULSE_ATR_THRESHOLD = 1.5  # next candle must be > 1.5x ATR to qualify as impulse
-
 
 def detect_order_block(
     df: pd.DataFrame,
@@ -56,29 +62,17 @@ def detect_order_block(
     if len(df) < 10:
         return {"status": "insufficient_data", "needed": 10, "got": len(df), "obs": [], "count": 0}
 
-    atr = float((df["high"] - df["low"]).rolling(14).mean().iloc[-1])
-    opens = df["open"].values
-    highs = df["high"].values
-    lows = df["low"].values
-    closes = df["close"].values
-    tss = df.index
+    atr = calc_atr(df)
+    opens, highs, lows, closes, tss = extract_arrays(df)
 
     current_price = float(closes[-1])
     start_i = max(1, len(df) - lookback - 1)
     obs: list[dict] = []
 
     for i in range(start_i, len(df) - 2):
-        candle_range = highs[i] - lows[i]
-        next_range = highs[i + 1] - lows[i + 1]
-
-        # Bullish OB: bearish candle (close < open) followed by bullish impulse
-        is_bearish_candle = closes[i] < opens[i]
-        is_bullish_impulse = (closes[i + 1] > highs[i] and next_range > _IMPULSE_ATR_THRESHOLD * atr)
-
-        if is_bearish_candle and is_bullish_impulse:
-            ob_high = max(opens[i], closes[i])
-            ob_low = min(opens[i], closes[i])
-            mitigated = _is_mitigated("bullish", ob_high, ob_low, lows[i + 2:])
+        if is_bullish_ob(closes, opens, highs, lows, i, atr):
+            ob_high, ob_low = calc_ob_zone(highs, lows, i)
+            mitigated = is_zone_mitigated(ob_high, ob_low, lows[i + 2:], "bullish")
             has_fvg = _check_fvg_after(df, i + 1, "bullish")
             distance = round(abs(current_price - ob_low) / atr, 2) if atr else 0
             obs.append({
@@ -92,14 +86,9 @@ def detect_order_block(
                 "age_bars": len(df) - 1 - i,
             })
 
-        # Bearish OB: bullish candle (close > open) followed by bearish impulse
-        is_bullish_candle = closes[i] > opens[i]
-        is_bearish_impulse = (closes[i + 1] < lows[i] and next_range > _IMPULSE_ATR_THRESHOLD * atr)
-
-        if is_bullish_candle and is_bearish_impulse:
-            ob_high = max(opens[i], closes[i])
-            ob_low = min(opens[i], closes[i])
-            mitigated = _is_mitigated("bearish", ob_high, ob_low, highs[i + 2:])
+        if is_bearish_ob(closes, opens, highs, lows, i, atr):
+            ob_high, ob_low = calc_ob_zone(highs, lows, i)
+            mitigated = is_zone_mitigated(ob_high, ob_low, highs[i + 2:], "bearish")
             has_fvg = _check_fvg_after(df, i + 1, "bearish")
             distance = round(abs(current_price - ob_high) / atr, 2) if atr else 0
             obs.append({
@@ -117,16 +106,6 @@ def detect_order_block(
     obs.sort(key=lambda x: (x["is_mitigated"], x["age_bars"]))
     trimmed = obs[:max_results]
     return {"obs": trimmed, "count": len(trimmed)}
-
-
-def _is_mitigated(
-    ob_type: str, ob_high: float, ob_low: float, future_prices: "np.ndarray"
-) -> bool:
-    midpoint = (ob_high + ob_low) / 2
-    if ob_type == "bullish":
-        return bool((future_prices <= midpoint).any())
-    else:
-        return bool((future_prices >= midpoint).any())
 
 
 def _check_fvg_after(df: pd.DataFrame, impulse_idx: int, ob_type: str) -> bool:

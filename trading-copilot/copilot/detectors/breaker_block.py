@@ -16,8 +16,15 @@ Per KB: Breaker Blocks are higher-probability than plain OBs because they
 represent confirmed institutional failure — the zone has been tested and rejected once.
 """
 
-import numpy as np
 import pandas as pd
+
+from copilot.detectors.utils import (
+    calc_atr,
+    calc_ob_zone,
+    extract_arrays,
+    is_bearish_ob,
+    is_bullish_ob,
+)
 
 TOOL_SCHEMA = {
     "name": "detect_breaker_block",
@@ -42,8 +49,6 @@ TOOL_SCHEMA = {
     },
 }
 
-_IMPULSE_ATR_THRESHOLD = 1.5
-
 
 def detect_breaker_block(
     df: pd.DataFrame,
@@ -59,31 +64,30 @@ def detect_breaker_block(
             "count": 0,
         }
 
-    atr = float((df["high"] - df["low"]).rolling(14).mean().iloc[-1])
-    opens = df["open"].values
-    highs = df["high"].values
-    lows = df["low"].values
-    closes = df["close"].values
-    tss = df.index
+    atr = calc_atr(df)
+    opens, highs, lows, closes, tss = extract_arrays(df)
 
     breakers: list[dict] = []
     start_i = max(1, len(df) - lookback - 1)
 
     for i in range(start_i, len(df) - 2):
-        impulse_range = highs[i + 1] - lows[i + 1]
-
         # ── Bullish OB: bearish candle → bullish impulse ──
-        if closes[i] < opens[i] and closes[i + 1] > highs[i] and impulse_range > _IMPULSE_ATR_THRESHOLD * atr:
-            ob_high = max(opens[i], closes[i])
-            ob_low = min(opens[i], closes[i])
+        if is_bullish_ob(closes, opens, highs, lows, i, atr):
+            ob_high, ob_low = calc_ob_zone(highs, lows, i)
 
-            # Was the OB fully pierced? (close below ob_low after impulse)
-            fut_closes = closes[i + 2:]
+            # Pierce confirmed by a bearish FVG (3-candle pattern) that closes below ob_low.
+            # Triple (j, j+1, j+2): highs[j+2] < lows[j]  AND  highs[j+2] < ob_low
             fut_highs = highs[i + 2:]
-            pierce_mask = fut_closes < ob_low
+            fut_lows = lows[i + 2:]
+            fut_closes = closes[i + 2:]
 
-            if pierce_mask.any():
-                first_pierce = int(np.argmax(pierce_mask))
+            first_pierce = -1
+            for j in range(len(fut_highs) - 2):
+                if fut_highs[j + 2] < fut_lows[j] and fut_highs[j + 2] < ob_low:
+                    first_pierce = j + 2
+                    break
+
+            if first_pierce >= 0:
                 after_closes = fut_closes[first_pierce + 1:]
                 after_highs = fut_highs[first_pierce + 1:]
 
@@ -103,17 +107,22 @@ def detect_breaker_block(
                     })
 
         # ── Bearish OB: bullish candle → bearish impulse ──
-        if closes[i] > opens[i] and closes[i + 1] < lows[i] and impulse_range > _IMPULSE_ATR_THRESHOLD * atr:
-            ob_high = max(opens[i], closes[i])
-            ob_low = min(opens[i], closes[i])
+        if is_bearish_ob(closes, opens, highs, lows, i, atr):
+            ob_high, ob_low = calc_ob_zone(highs, lows, i)
 
-            # Was the OB fully pierced? (close above ob_high after impulse)
-            fut_closes = closes[i + 2:]
+            # Pierce confirmed by a bullish FVG (3-candle pattern) that closes above ob_high.
+            # Triple (j, j+1, j+2): lows[j+2] > highs[j]  AND  lows[j+2] > ob_high
+            fut_highs = highs[i + 2:]
             fut_lows = lows[i + 2:]
-            pierce_mask = fut_closes > ob_high
+            fut_closes = closes[i + 2:]
 
-            if pierce_mask.any():
-                first_pierce = int(np.argmax(pierce_mask))
+            first_pierce = -1
+            for j in range(len(fut_lows) - 2):
+                if fut_lows[j + 2] > fut_highs[j] and fut_lows[j + 2] > ob_high:
+                    first_pierce = j + 2
+                    break
+
+            if first_pierce >= 0:
                 after_closes = fut_closes[first_pierce + 1:]
                 after_lows = fut_lows[first_pierce + 1:]
 

@@ -3,13 +3,17 @@ Break of Structure (BOS) / Market Structure Shift (MSS) detector.
 
 Terminology (per KB):
 - BOS  : break in the trend direction (continuation); new HH in bull trend or LL in bear trend.
-- cBOS : confirmed BOS — same as BOS but with clear displacement (large range candle).
-- MSS  : break AGAINST the trend (structure shift / reversal signal).
+- cBOS : confirmed BOS — displacement candle whose body exceeds 1.5 × ATR(14).
+- MSS  : break AGAINST the current bias (structure shift / reversal signal).
 
 Detection rule: candle CLOSE must breach the prior swing extreme (not just a wick).
+
+Algorithm: scan swings FORWARD, maintaining a rolling reference to the most recent
+confirmed swing high and swing low.  At each bar we check whether the close crosses
+the current reference; bias updates on every confirmed break so later breaks are
+correctly classified as BOS (with trend) or MSS (against trend).
 """
 
-import numpy as np
 import pandas as pd
 
 from copilot.detectors.market_structure import _find_swings
@@ -17,10 +21,11 @@ from copilot.detectors.market_structure import _find_swings
 TOOL_SCHEMA = {
     "name": "detect_bos",
     "description": (
-        "Detect the most recent Break of Structure (BOS), Market Structure Shift (MSS), "
-        "or Continuation BOS (cBOS) on a given timeframe. "
-        "BOS confirms trend continuation; MSS signals potential reversal. "
-        "Use after detect_market_structure to confirm if structure is still intact or has shifted."
+        "Detect Break of Structure (BOS), Confirmed BOS (cBOS), and Market Structure Shift (MSS) "
+        "events on a given timeframe.  Returns the most recent events newest-first with direction, "
+        "broken level, and break-candle body size relative to ATR. "
+        "BOS confirms trend continuation; cBOS adds displacement confirmation; "
+        "MSS signals a potential trend reversal."
     ),
     "input_schema": {
         "type": "object",
@@ -37,85 +42,108 @@ TOOL_SCHEMA = {
 }
 
 
-def detect_bos(df: pd.DataFrame, swing_lookback: int = 5) -> dict:
+def detect_bos(
+    df: pd.DataFrame,
+    swing_lookback: int = 5,
+    max_results: int = 5,
+) -> dict:
     min_bars = swing_lookback * 2 + 5
     if len(df) < min_bars:
-        return {"status": "insufficient_data", "needed": min_bars, "got": len(df)}
+        return {
+            "status": "insufficient_data",
+            "needed": min_bars,
+            "got": len(df),
+            "events": [],
+            "count": 0,
+            "latest_bias": "none",
+        }
 
-    swings = _find_swings(df, swing_lookback)
-    highs = [s for s in swings if s["type"] == "high"]
-    lows = [s for s in swings if s["type"] == "low"]
-
-    if not highs or not lows:
-        return {"type": "none", "direction": "none", "broken_level": None, "break_ts": None,
-                "displacement_candles": 0, "displacement_atr_multiple": 0.0}
-
-    last_h = highs[-1]
-    last_l = lows[-1]
-
-    closes = df["close"].values
+    opens_arr = df["open"].values
+    closes_arr = df["close"].values
     tss = df.index
     atr = float((df["high"] - df["low"]).rolling(14).mean().iloc[-1])
 
-    # Scan backwards to find the MOST RECENT structural break by close.
-    # Scanning forward would stop at the first break (e.g. a cBOS mid-trend)
-    # and miss a later MSS — the opposite of what the trader needs.
-    bos_event = None
-    scan_start = max(swing_lookback, 10)
-    for i in range(len(df) - 1, scan_start, -1):
-        c = closes[i]
+    all_swings = _find_swings(df, swing_lookback)
+    if not all_swings:
+        return {"events": [], "count": 0, "latest_bias": "none"}
+
+    # Enrich each swing with its integer bar position so we can compare to loop index.
+    # _find_swings stores timestamps as str(pd.Timestamp); build a reverse map.
+    ts_to_pos = {str(ts): pos for pos, ts in enumerate(tss)}
+    for s in all_swings:
+        s["idx"] = ts_to_pos.get(s["ts"], -1)
+
+    swing_highs = sorted(
+        [s for s in all_swings if s["type"] == "high" and s["idx"] >= 0],
+        key=lambda s: s["idx"],
+    )
+    swing_lows = sorted(
+        [s for s in all_swings if s["type"] == "low" and s["idx"] >= 0],
+        key=lambda s: s["idx"],
+    )
+
+    if not swing_highs and not swing_lows:
+        return {"events": [], "count": 0, "latest_bias": "none"}
+
+    events: list[dict] = []
+    current_bias: str = "none"
+
+    # Pointers into swing_highs / swing_lows: -1 = no swing seen yet.
+    h_ptr: int = -1
+    l_ptr: int = -1
+    # Remember which pointer value we last broke to avoid re-detecting the same swing.
+    broken_h_ptr: int | None = None
+    broken_l_ptr: int | None = None
+
+    scan_start = swing_lookback * 2
+
+    for i in range(scan_start, len(df)):
+        # Advance to the last confirmed swing high/low with idx < i.
+        while h_ptr + 1 < len(swing_highs) and swing_highs[h_ptr + 1]["idx"] < i:
+            h_ptr += 1
+        while l_ptr + 1 < len(swing_lows) and swing_lows[l_ptr + 1]["idx"] < i:
+            l_ptr += 1
+
+        ref_h = swing_highs[h_ptr] if h_ptr >= 0 else None
+        ref_l = swing_lows[l_ptr] if l_ptr >= 0 else None
+
+        c = closes_arr[i]
+        body = abs(closes_arr[i] - opens_arr[i])
         ts = tss[i]
 
-        # MSS: close breaks below the most recent swing LOW (bearish reversal signal)
-        if c < last_l["price"] and pd.Timestamp(last_l["ts"]) < ts:
-            displacement = _count_displacement(closes, i)
-            bos_event = {
-                "type": "MSS",
-                "direction": "bearish",
-                "broken_level": round(last_l["price"], 2),
-                "break_ts": ts.isoformat(),
-                "displacement_candles": displacement,
-                "displacement_atr_multiple": round(
-                    abs(c - last_l["price"]) / atr if atr else 0, 2
-                ),
-            }
-            break
-
-        # BOS/cBOS: close breaks above the most recent swing HIGH (bullish continuation)
-        if c > last_h["price"] and pd.Timestamp(last_h["ts"]) < ts:
-            displacement = _count_displacement(closes, i)
-            bos_event = {
-                "type": "BOS" if abs(c - last_h["price"]) < 2 * atr else "cBOS",
+        # ── Bullish break: close above the current reference swing high ──
+        if ref_h is not None and c > ref_h["price"] and h_ptr != broken_h_ptr:
+            bos_type = "MSS" if current_bias == "bearish" else "BOS"
+            if bos_type == "BOS" and body > 1.5 * atr:
+                bos_type = "cBOS"
+            events.append({
+                "type": bos_type,
                 "direction": "bullish",
-                "broken_level": round(last_h["price"], 2),
+                "broken_level": round(ref_h["price"], 2),
                 "break_ts": ts.isoformat(),
-                "displacement_candles": displacement,
-                "displacement_atr_multiple": round(
-                    abs(c - last_h["price"]) / atr if atr else 0, 2
-                ),
-            }
-            break
+                "break_candle_body_atr": round(body / atr, 2) if atr else 0,
+            })
+            current_bias = "bullish"
+            broken_h_ptr = h_ptr
 
-    if bos_event:
-        return bos_event
+        # ── Bearish break: close below the current reference swing low ──
+        elif ref_l is not None and c < ref_l["price"] and l_ptr != broken_l_ptr:
+            bos_type = "MSS" if current_bias == "bullish" else "BOS"
+            if bos_type == "BOS" and body > 1.5 * atr:
+                bos_type = "cBOS"
+            events.append({
+                "type": bos_type,
+                "direction": "bearish",
+                "broken_level": round(ref_l["price"], 2),
+                "break_ts": ts.isoformat(),
+                "break_candle_body_atr": round(body / atr, 2) if atr else 0,
+            })
+            current_bias = "bearish"
+            broken_l_ptr = l_ptr
 
+    events_out = list(reversed(events))[:max_results]
     return {
-        "type": "none",
-        "direction": "none",
-        "broken_level": None,
-        "break_ts": None,
-        "displacement_candles": 0,
-        "displacement_atr_multiple": 0.0,
+        "events": events_out,
+        "count": len(events_out),
+        "latest_bias": current_bias,
     }
-
-
-def _count_displacement(closes: "np.ndarray", break_idx: int, window: int = 5) -> int:
-    """Count consecutive candles moving in the break direction after the break."""
-    direction = 1 if closes[break_idx] > closes[break_idx - 1] else -1
-    count = 0
-    for j in range(break_idx, min(break_idx + window, len(closes) - 1)):
-        if (closes[j + 1] - closes[j]) * direction > 0:
-            count += 1
-        else:
-            break
-    return count

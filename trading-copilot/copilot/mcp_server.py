@@ -11,9 +11,9 @@ Registration in claude_desktop_config.json:
         "trading-copilot": {
           "command": "python",
           "args": ["-m", "copilot.mcp_server"],
-          "cwd": "D:\\\\Projects\\\\vibecoding\\\\trading-copilot-workspace\\\\trading-copilot",
+          "cwd": "D:\\Projects\\vibecoding\\trading-copilot-workspace\\trading-copilot",
           "env": {
-            "PYTHONPATH": "D:\\\\Projects\\\\vibecoding\\\\trading-copilot-workspace\\\\trading-copilot\\\\.venv_mcp;D:\\\\Projects\\\\vibecoding\\\\trading-copilot-workspace\\\\trading-copilot"
+            "PYTHONPATH": "D:\\Projects\\vibecoding\\trading-copilot-workspace\\trading-copilot\\.venv_mcp;D:\\Projects\\vibecoding\\trading-copilot-workspace\\trading-copilot"
           }
         }
       }
@@ -26,10 +26,13 @@ Usage in Cowork:
   4. Connect this MCP server in project settings.
 """
 
+from __future__ import annotations
+
 import asyncio
 import json
+import logging
 import sys
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 
 # Ensure local mcp install is importable when launched by Desktop
@@ -44,6 +47,8 @@ from mcp.types import TextContent, Tool
 from copilot.journal.record import TradeRecord, compute_rr, session_from_ts, parse_ts
 from copilot.journal.writer import append_record
 from copilot.llm.tools import ToolRegistry
+
+logger = logging.getLogger(__name__)
 
 # ── Suggested system instruction for Cowork projects ──────────────────────────
 COWORK_INSTRUCTION = """
@@ -111,40 +116,69 @@ _SAVE_TRADE_SCHEMA: dict = {
 }
 
 
-def _save_trade(arguments: dict) -> dict:
-    args = dict(arguments)
+def _build_trade_record(arguments: dict) -> tuple[TradeRecord, None] | tuple[None, str]:
+    """
+    Validate and enrich trade arguments, returning (TradeRecord, None) on success
+    or (None, error_message) on failure.
 
-    if ts_entry := args.get("ts_entry"):
-        args["ts_entry"] = parse_ts(ts_entry)
-    if ts_exit := args.get("ts_exit"):
-        args["ts_exit"] = parse_ts(ts_exit)
+    Auto-derives: session, day_of_week, rr_planned, pnl_r.
+    """
+    try:
+        args = dict(arguments)
 
-    if args.get("ts_entry") and "session" not in args:
-        args["session"] = session_from_ts(args["ts_entry"])
-    if args.get("ts_entry") and "day_of_week" not in args:
-        try:
-            dt = datetime.fromisoformat(args["ts_entry"].replace("Z", "+00:00"))
-            args["day_of_week"] = dt.weekday()
-        except ValueError:
-            pass
+        if ts_entry := args.get("ts_entry"):
+            args["ts_entry"] = parse_ts(ts_entry)
+        if ts_exit := args.get("ts_exit"):
+            args["ts_exit"] = parse_ts(ts_exit)
 
-    entry = args.get("entry_price")
-    sl = args.get("sl_price")
-    tps = args.get("tp_prices", [])
-    direction = args.get("direction", "")
+        if args.get("ts_entry") and "session" not in args:
+            args["session"] = session_from_ts(args["ts_entry"])
+        if args.get("ts_entry") and "day_of_week" not in args:
+            try:
+                dt = datetime.fromisoformat(args["ts_entry"].replace("Z", "+00:00"))
+                args["day_of_week"] = dt.weekday()
+            except ValueError:
+                pass  # leave day_of_week at default 0; non-fatal
 
-    if entry and sl and tps and "rr_planned" not in args:
-        args["rr_planned"] = compute_rr(entry, sl, tps[0], direction)
+        entry = args.get("entry_price")
+        sl = args.get("sl_price")
+        tps = args.get("tp_prices", [])
+        direction = args.get("direction", "")
 
-    exit_price = args.get("exit_price")
-    if entry and sl and exit_price and "pnl_r" not in args:
-        args["pnl_r"] = compute_rr(entry, sl, exit_price, direction)
+        if entry and sl and tps and "rr_planned" not in args:
+            args["rr_planned"] = compute_rr(entry, sl, tps[0], direction)
 
-    known = set(TradeRecord.__dataclass_fields__)
-    rec = TradeRecord(**{k: v for k, v in args.items() if k in known})
-    path = append_record(rec)
+        exit_price = args.get("exit_price")
+        if entry and sl and exit_price and "pnl_r" not in args:
+            args["pnl_r"] = compute_rr(entry, sl, exit_price, direction)
 
-    return {"saved": True, "id": rec.id, "path": str(path), "record": rec.to_dict()}
+        known = set(TradeRecord.__dataclass_fields__)
+        rec = TradeRecord(**{k: v for k, v in args.items() if k in known})
+        return rec, None
+
+    except Exception as exc:  # noqa: BLE001
+        return None, f"Failed to build TradeRecord: {exc}"
+
+
+async def _save_trade(arguments: dict) -> dict:
+    """
+    Persist a trade to the journal.
+
+    Runs the synchronous SQLite write in a thread pool so it doesn't block
+    the MCP event loop.  Returns a result dict (always — never raises).
+    """
+    rec, err = _build_trade_record(arguments)
+    if err:
+        logger.error("save_trade validation error: %s", err)
+        return {"saved": False, "error": err}
+
+    try:
+        path = await asyncio.to_thread(append_record, rec)
+        logger.info("save_trade: saved %s id=%s", rec.symbol, rec.id)
+        return {"saved": True, "id": rec.id, "path": str(path), "record": rec.to_dict()}
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("save_trade: journal write failed for id=%s", rec.id)
+        return {"saved": False, "error": f"Journal write failed: {exc}", "id": rec.id}
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -164,11 +198,25 @@ async def list_tools() -> list[Tool]:
 
 @server.call_tool()
 async def call_tool(name: str, arguments: dict) -> list[TextContent]:
-    if name == "save_trade":
-        result = _save_trade(arguments)
-    else:
-        _registry.clear_cache()
-        result = _registry.dispatch(name, arguments)
+    """
+    Route MCP tool calls to the appropriate handler.
+
+    The detector result cache is intentionally NOT cleared here — it persists
+    for the lifetime of the server process so that repeated identical calls
+    within a single analysis session are served from memory rather than
+    re-fetching from Binance.  The cache is effectively bounded by the server
+    process lifetime (stdio servers restart per session in Claude Desktop).
+    """
+    logger.debug("call_tool: name=%s args=%s", name, list(arguments.keys()))
+    try:
+        if name == "save_trade":
+            result = await _save_trade(arguments)
+        else:
+            result = _registry.dispatch(name, arguments)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("call_tool: unhandled exception in tool %r", name)
+        result = {"error": f"Internal server error in tool '{name}': {exc}"}
+
     return [TextContent(type="text", text=json.dumps(result, default=str, indent=2))]
 
 

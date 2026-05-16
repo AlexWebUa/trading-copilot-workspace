@@ -21,6 +21,8 @@ counter-directional interest. The C1 body becomes the zone price will respect.
 
 import pandas as pd
 
+from copilot.detectors.utils import calc_atr, extract_arrays
+
 TOOL_SCHEMA = {
     "name": "detect_rejection_block",
     "description": (
@@ -65,21 +67,16 @@ def detect_rejection_block(
             "count": 0,
         }
 
-    atr = float((df["high"] - df["low"]).rolling(14).mean().iloc[-1])
+    atr = calc_atr(df)
     min_body = atr * min_body_atr
 
-    opens = df["open"].values
-    highs = df["high"].values
-    lows = df["low"].values
-    closes = df["close"].values
-    tss = df.index
+    opens, highs, lows, closes, tss = extract_arrays(df)
 
     blocks: list[dict] = []
     start_i = max(1, len(df) - lookback - 1)
 
     for i in range(start_i, len(df) - 1):
-        c1_body_high = max(opens[i], closes[i])
-        c1_body_low = min(opens[i], closes[i])
+        c1_body_high, c1_body_low = max(opens[i], closes[i]), min(opens[i], closes[i])
         c1_body_size = c1_body_high - c1_body_low
 
         if c1_body_size < min_body:

@@ -24,8 +24,18 @@ Detection logic:
   4. Return unmitigated blocks (zone midpoint not yet visited by any wick).
 """
 
-import numpy as np
 import pandas as pd
+
+from copilot.detectors.utils import (
+    IMPULSE_ATR_THRESHOLD,
+    calc_atr,
+    calc_ob_zone,
+    extract_arrays,
+    find_sweep,
+    is_bearish_ob,
+    is_bullish_ob,
+    is_zone_mitigated,
+)
 
 TOOL_SCHEMA = {
     "name": "detect_mitigation_block",
@@ -55,8 +65,6 @@ TOOL_SCHEMA = {
     },
 }
 
-_IMPULSE_ATR_THRESHOLD = 1.5
-
 
 def detect_mitigation_block(
     df: pd.DataFrame,
@@ -73,39 +81,26 @@ def detect_mitigation_block(
             "count": 0,
         }
 
-    atr = float((df["high"] - df["low"]).rolling(14).mean().iloc[-1])
-    opens = df["open"].values
-    highs = df["high"].values
-    lows = df["low"].values
-    closes = df["close"].values
-    tss = df.index
+    atr = calc_atr(df)
+    opens, highs, lows, closes, tss = extract_arrays(df)
 
     blocks: list[dict] = []
     start_i = max(sweep_window + 1, len(df) - lookback - 1)
 
     for i in range(start_i, len(df) - 2):
-        impulse_range = highs[i + 1] - lows[i + 1]
-
         # ── Bullish OB: bearish candle → bullish impulse ──
-        if closes[i] < opens[i] and closes[i + 1] > highs[i] and impulse_range > _IMPULSE_ATR_THRESHOLD * atr:
-            ob_high = max(opens[i], closes[i])
-            ob_low = min(opens[i], closes[i])
+        if is_bullish_ob(closes, opens, highs, lows, i, atr):
+            ob_high, ob_low = calc_ob_zone(highs, lows, i)
 
             # Look for a sellside sweep in the window before the OB:
             # A wick below ob_low that closes back above ob_low → sellside swept
             pre_start = max(0, i - sweep_window)
-            pre_lows = lows[pre_start:i]
-            pre_closes = closes[pre_start:i]
-
-            prior_sweep = _has_sweep_of_level(pre_lows, pre_closes, ob_low, side="sellside")
+            prior_sweep, _ = find_sweep(lows[pre_start:i], closes[pre_start:i], ob_low, "sellside")
 
             if prior_sweep:
                 continue  # Liquidity was swept → regular sponsored OB, skip
 
-            # Mitigated when any future wick reaches the zone midpoint
-            future_lows = lows[i + 2:]
-            midpoint = (ob_high + ob_low) / 2
-            is_mitigated = len(future_lows) > 0 and bool((future_lows <= midpoint).any())
+            is_mitigated = is_zone_mitigated(ob_high, ob_low, lows[i + 2:], "bullish")
 
             blocks.append({
                 "type": "bullish",
@@ -118,25 +113,18 @@ def detect_mitigation_block(
             })
 
         # ── Bearish OB: bullish candle → bearish impulse ──
-        if closes[i] > opens[i] and closes[i + 1] < lows[i] and impulse_range > _IMPULSE_ATR_THRESHOLD * atr:
-            ob_high = max(opens[i], closes[i])
-            ob_low = min(opens[i], closes[i])
+        if is_bearish_ob(closes, opens, highs, lows, i, atr):
+            ob_high, ob_low = calc_ob_zone(highs, lows, i)
 
             # Look for a buyside sweep in the window before the OB:
             # A wick above ob_high that closes back below ob_high → buyside swept
             pre_start = max(0, i - sweep_window)
-            pre_highs = highs[pre_start:i]
-            pre_closes = closes[pre_start:i]
-
-            prior_sweep = _has_sweep_of_level(pre_highs, pre_closes, ob_high, side="buyside")
+            prior_sweep, _ = find_sweep(highs[pre_start:i], closes[pre_start:i], ob_high, "buyside")
 
             if prior_sweep:
                 continue  # Liquidity swept → regular sponsored OB, skip
 
-            # Mitigated when any future wick reaches the zone midpoint
-            future_highs = highs[i + 2:]
-            midpoint = (ob_high + ob_low) / 2
-            is_mitigated = len(future_highs) > 0 and bool((future_highs >= midpoint).any())
+            is_mitigated = is_zone_mitigated(ob_high, ob_low, highs[i + 2:], "bearish")
 
             blocks.append({
                 "type": "bearish",
@@ -152,25 +140,3 @@ def detect_mitigation_block(
     blocks.sort(key=lambda x: (x["is_mitigated"], x["age_bars"]))
     result = blocks[:max_results]
     return {"blocks": result, "count": len(result)}
-
-
-def _has_sweep_of_level(
-    wicks: np.ndarray,
-    closes: np.ndarray,
-    level: float,
-    side: str,
-) -> bool:
-    """
-    Check if any bar has a wick past `level` that closes back on the safe side.
-
-    sellside: wick below level (low < level) AND close > level
-    buyside:  wick above level (high > level) AND close < level
-    """
-    for j in range(len(wicks)):
-        if side == "sellside":
-            if wicks[j] < level and closes[j] > level:
-                return True
-        else:  # buyside
-            if wicks[j] > level and closes[j] < level:
-                return True
-    return False

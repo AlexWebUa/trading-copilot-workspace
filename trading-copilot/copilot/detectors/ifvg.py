@@ -19,6 +19,8 @@ that now act as POIs from the opposite direction.
 import numpy as np
 import pandas as pd
 
+from copilot.detectors.utils import calc_atr, detect_fvg_zone, extract_arrays
+
 TOOL_SCHEMA = {
     "name": "detect_ifvg",
     "description": (
@@ -67,33 +69,21 @@ def detect_ifvg(
             "count": 0,
         }
 
-    atr = float((df["high"] - df["low"]).rolling(14).mean().iloc[-1])
+    atr = calc_atr(df)
     min_width = atr * min_width_atr
 
-    highs = df["high"].values
-    lows = df["low"].values
-    closes = df["close"].values
-    tss = df.index
+    _, highs, lows, closes, tss = extract_arrays(df)
 
     ifvgs: list[dict] = []
     # Need at least 2 bars after C2 to check for pierce
     start_i = max(0, len(df) - lookback - 2)
 
     for i in range(start_i, len(df) - 4):
-        c0_high, c0_low = highs[i], lows[i]
-        c2_high, c2_low = highs[i + 2], lows[i + 2]
-
-        # Standard FVG detection
-        if c2_low > c0_high:
-            upper, lower = c2_low, c0_high
-            orig_type = "bullish"
-            inv_type = "bearish"  # after pierce, acts as resistance
-        elif c2_high < c0_low:
-            upper, lower = c0_low, c2_high
-            orig_type = "bearish"
-            inv_type = "bullish"  # after pierce, acts as support
-        else:
+        zone = detect_fvg_zone(highs, lows, i)
+        if zone is None:
             continue
+        upper, lower, orig_type = zone
+        inv_type = "bearish" if orig_type == "bullish" else "bullish"
 
         if (upper - lower) < min_width:
             continue
