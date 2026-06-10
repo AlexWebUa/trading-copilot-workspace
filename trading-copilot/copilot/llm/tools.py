@@ -33,7 +33,17 @@ _NO_DF_TOOLS = {"check_multi_tf_alignment", "current_killzone"}
 _PASS_META_TOOLS = {"generate_pine_script"}
 
 # Tools that need OHLCV + delta columns (buy_vol/sell_vol/delta from klines)
-_DELTA_TOOLS = {"detect_cumulative_delta", "check_cd_divergence_at_structure"}
+_DELTA_TOOLS = {"detect_cumulative_delta"}
+
+# Quarantined June 2026 (Course Correction #2, PLAN.md P0-4): empirical probes
+# showed these produce noise (compressions on random walks, absorption with
+# below-average volume, divergence only on the current bar). Not exposed to
+# the LLM until rewritten — see DETECTOR_REVIEW_2026-06-10.md.
+_QUARANTINED_TOOLS = {
+    "detect_compression",
+    "check_absorption_at_poi",
+    "check_cd_divergence_at_structure",
+}
 
 
 class ToolRegistry:
@@ -55,6 +65,8 @@ class ToolRegistry:
             if schema is None:
                 continue
             fn_name = schema["name"]
+            if fn_name in _QUARANTINED_TOOLS:
+                continue
             fn = getattr(mod, fn_name, None)
             if fn is None:
                 raise RuntimeError(
@@ -115,7 +127,12 @@ class ToolRegistry:
         # Delta tools need buy_vol/sell_vol/delta columns from klines
         if tool_name in _DELTA_TOOLS:
             try:
-                df = fetch_ohlcv_with_delta(symbol, tf, bars)
+                # P0-6: go through the injected source (and its cache) when
+                # it supports delta; module-level fetch is the fallback.
+                if hasattr(self._source, "get_ohlc_with_delta"):
+                    df = self._source.get_ohlc_with_delta(symbol, tf, bars)
+                else:
+                    df = fetch_ohlcv_with_delta(symbol, tf, bars)
             except Exception as e:
                 logger.exception("Delta data fetch failed for %s/%s", symbol, tf)
                 return {"error": f"Delta data fetch failed for {symbol}/{tf}: {e}"}

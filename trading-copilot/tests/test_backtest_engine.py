@@ -330,21 +330,20 @@ def _make_ltf_df(
 def test_ltf_exit_resolves_trade():
     """
     When entry_tf is set, IN_TRADE should exit on a 5m bar that hits TP.
-    Signal fires at HTF bar 50 (2026-04-03 12:00 UTC).
-    LTF bars run at 5m; bar 602 = 12:10 April 3 — 2 bars after entry — hits TP.
+    Signal fires at HTF bar 50 (2026-04-03 12:00 UTC), closing 13:00.
+    LTF scan starts at the signal bar's close — bar 612 (13:00).
     """
     # HTF df: 80 h bars starting 2026-04-01 10:00; all bars neutral ±0.2
     htf = _make_df(n=80, base=100.0, high_offsets=[0.2] * 80, low_offsets=[0.2] * 80)
 
     # LTF df: 5m bars. Signal fires at HTF bar 50 = 50h from start = 3000 min.
-    # LTF bar 600 = 3000 min from start = April 3 12:00 (same as signal ts).
-    # _find_ltf_idx returns bar 601 (first bar AFTER signal ts = 12:05).
-    # Entry is on bar 601 (12:05). First exit check on HTF bar 52 checks LTF bars 602+.
-    # Bar 602 (12:10) high=115 > TP=108 → win.
+    # Signal bar closes at 13:00 = LTF bar 612 (first scannable bar).
+    # Entry on bar 612 close (13:00). Exit scan covers LTF bars 613+.
+    # Bar 614 (13:10) high=115 > TP=108 → win.
     n_ltf = 80 * 12 + 50
     hi_off = [0.2] * n_ltf
     lo_off = [0.2] * n_ltf
-    hi_off[602] = 15.0  # LTF bar 602 = April 3 12:10 UTC → high=115 > TP=108
+    hi_off[614] = 15.0  # LTF bar 614 = April 3 13:10 UTC → high=115 > TP=108
     ltf = _make_ltf_df(n_ltf, base=100.0, minutes_step=5, high_offsets=hi_off, low_offsets=lo_off)
 
     rule = SetupRule(
@@ -614,11 +613,11 @@ def test_expired_trades_included_in_report():
 # Change 5: Fee model
 # ---------------------------------------------------------------------------
 
-def test_fee_reduces_pnl_r():
+def test_fee_reduces_pnl_r_two_sided():
     """
-    A fee of 8 bps should reduce pnl_r by (entry * 8 / 10_000) / risk.
-    Entry=100, SL=95 (risk=5). Fee_r = (100 * 8 / 10000) / 5 = 0.016R.
-    A 2R win should net 1.984R after fees.
+    P0-6: fee_bps is per side, charged on entry AND exit notional.
+    Entry=100, exit=110, SL=95 (risk=5), fee 8 bps per side.
+    fee_r = ((100 + 110) * 8 / 10_000) / 5 = 0.0336R → 2R win nets 1.9664R.
     """
     from copilot.backtest.engine import _finalize_trade
     from copilot.journal.record import TradeRecord
@@ -629,8 +628,28 @@ def test_fee_reduces_pnl_r():
         result="pending",
     )
     trade = _finalize_trade(trade, "win", 110.0, "t1", fee_bps=8.0, original_sl=95.0)
-    # pnl_r before fee = 2.0R; fee_r = (100 * 8/10000) / 5 = 0.016R
-    expected = round(2.0 - 0.016, 4)
+    expected = round(2.0 - 0.0336, 4)
+    assert trade.pnl_r == pytest.approx(expected, abs=0.001)
+
+
+def test_slippage_adds_to_cost():
+    """
+    P0-6: slippage_bps stacks with fee_bps per side.
+    fee 8 bps + slippage 2 bps = 10 bps per side →
+    cost_r = ((100 + 110) * 10 / 10_000) / 5 = 0.042R.
+    """
+    from copilot.backtest.engine import _finalize_trade
+    from copilot.journal.record import TradeRecord
+
+    trade = TradeRecord(
+        record_type="backtest", symbol="BTC", direction="long",
+        entry_price=100.0, sl_price=95.0, tp_prices=[110.0],
+        result="pending",
+    )
+    trade = _finalize_trade(
+        trade, "win", 110.0, "t1", fee_bps=8.0, original_sl=95.0, slippage_bps=2.0
+    )
+    expected = round(2.0 - 0.042, 4)
     assert trade.pnl_r == pytest.approx(expected, abs=0.001)
 
 

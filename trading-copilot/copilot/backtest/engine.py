@@ -238,8 +238,22 @@ class BacktestEngine:
             for htf_tf in htf_tfs:
                 htf_min = _TF_MINUTES.get(htf_tf, 240)
                 htf_bars = max(100, len(df) * tf_min // max(htf_min, 1) + 50)
+                # Fetch by the backtest's own date range, not "most recent N
+                # bars" — otherwise historical runs evaluate HTF conditions on
+                # data from outside the backtest window. Leading buffer covers
+                # detector lookback on the first evaluated bars.
+                htf_start = df.index[0] - pd.Timedelta(minutes=htf_min * 150)
+                htf_end = df.index[-1] + pd.Timedelta(minutes=tf_min)
                 try:
-                    htf_dfs[htf_tf] = self._source.get_ohlc(symbol, htf_tf, htf_bars)
+                    try:
+                        htf_dfs[htf_tf] = self._source.get_ohlc(
+                            symbol, htf_tf,
+                            start_time=htf_start.isoformat(),
+                            end_time=htf_end.isoformat(),
+                        )
+                    except TypeError:
+                        # Source doesn't support range fetch (e.g. test mocks)
+                        htf_dfs[htf_tf] = self._source.get_ohlc(symbol, htf_tf, htf_bars)
                 except Exception:
                     logger.warning("HTF data unavailable for %s/%s: HTF conditions will fail", symbol, htf_tf, exc_info=True)
 
@@ -317,7 +331,8 @@ class BacktestEngine:
                         "exit_ts": et, "pnl_r": pnl_e or 0.0,
                     })
                     active_trade = _finalize_trade(active_trade, "expired", ep, et,
-                                                    rule.fee_bps, active_original_sl)
+                                                    rule.fee_bps, active_original_sl,
+                                                    rule.slippage_bps)
                     bars_in_trade_list.append(bars_elapsed)
                     completed_trades.append(active_trade)
                     active_trade = None
@@ -349,7 +364,8 @@ class BacktestEngine:
                                 "exit_ts": et2, "pnl_r": pnl_e or 0.0,
                             })
                             active_trade = _finalize_trade(active_trade, r2, ep2, et2,
-                                                            rule.fee_bps, active_original_sl)
+                                                            rule.fee_bps, active_original_sl,
+                                                    rule.slippage_bps)
                             bars_in_trade_list.append(i - active_entry_bar)
                             completed_trades.append(active_trade)
                             active_trade = None
@@ -374,7 +390,8 @@ class BacktestEngine:
                             "exit_ts": et2, "pnl_r": pnl_e or 0.0,
                         })
                         active_trade = _finalize_trade(active_trade, r2, ep2, et2,
-                                                        rule.fee_bps, active_original_sl)
+                                                        rule.fee_bps, active_original_sl,
+                                                    rule.slippage_bps)
                         bars_in_trade_list.append(i - active_entry_bar)
                         completed_trades.append(active_trade)
                         active_trade = None
@@ -390,7 +407,8 @@ class BacktestEngine:
                     ep = float(df.iloc[i]["close"])
                     et = df.index[i].strftime("%Y-%m-%dT%H:%M:%SZ")
                     active_trade = _finalize_trade(active_trade, "expired", ep, et,
-                                                    rule.fee_bps, active_original_sl)
+                                                    rule.fee_bps, active_original_sl,
+                                                    rule.slippage_bps)
                     bars_in_trade_list.append(bars_elapsed)
                     completed_trades.append(active_trade)
                     active_trade = None
@@ -432,6 +450,7 @@ class BacktestEngine:
                                 active_trade = _finalize_trade(
                                     active_trade, result, exit_price, exit_ts,
                                     rule.fee_bps, active_original_sl,
+                                    rule.slippage_bps,
                                 )
                                 bars_in_trade_list.append(i - active_entry_bar)
                                 completed_trades.append(active_trade)
@@ -463,6 +482,7 @@ class BacktestEngine:
                             active_trade = _finalize_trade(
                                 active_trade, result, exit_price, exit_ts,
                                 rule.fee_bps, active_original_sl,
+                                rule.slippage_bps,
                             )
                             bars_in_trade_list.append(i - active_entry_bar)
                             completed_trades.append(active_trade)
@@ -537,7 +557,7 @@ class BacktestEngine:
                             tp_price=tp1_price, rr_planned=rr,
                             entry_ts=entry_ts, session=session,
                             day_of_week=dow,
-                            tools_confirmed=list(signal_cache.keys()),
+                            tools_confirmed=_confirmed_tools(rule, include_ltf=True),
                         )
                         active_ltf_cursor = ltf_scan_cursor
                         active_entry_bar = i
@@ -556,6 +576,7 @@ class BacktestEngine:
                     current_bar_idx=i,
                     df=df,
                     detector_cache=signal_cache,
+                    direction=rule.direction,
                 )
                 if ep is _WAITING:
                     continue
@@ -592,7 +613,7 @@ class BacktestEngine:
                     tp_price=tp1_price, rr_planned=rr,
                     entry_ts=entry_ts, session=session,
                     day_of_week=dow,
-                    tools_confirmed=list(signal_cache.keys()),
+                    tools_confirmed=_confirmed_tools(rule),
                 )
                 active_entry_bar = i
                 active_original_sl = sl_price
@@ -617,6 +638,7 @@ class BacktestEngine:
                     htf_ok = _evaluate_htf_conditions(
                         rule.htf_conditions, htf_dfs, df.index[i],
                         active_registry, _htf_cache,
+                        tf_minutes=_TF_MINUTES.get(tf, 60),
                     )
                     if not htf_ok:
                         continue
@@ -627,8 +649,14 @@ class BacktestEngine:
 
                 if rule.entry_tf and _ltf_df is not None:
                     # Change 2: transition to LTF_SCAN
+                    # Scan starts at the signal bar's CLOSE — LTF bars inside
+                    # the still-forming signal bar happened before the signal
+                    # existed and must not be used for entry (look-ahead).
                     signal_bar_ts = df.index[i]
-                    ltf_scan_start_idx = _find_ltf_idx(_ltf_df, signal_bar_ts)
+                    signal_close_ts = signal_bar_ts + pd.Timedelta(
+                        minutes=_TF_MINUTES.get(tf, 60)
+                    )
+                    ltf_scan_start_idx = _find_ltf_idx(_ltf_df, signal_close_ts)
                     ltf_scan_cursor = ltf_scan_start_idx
                     signal_i = i
                     state = _LTF_SCAN
@@ -706,8 +734,12 @@ class BacktestEngine:
         use_delta = rule is not None and _needs_delta(rule)
         if use_delta:
             try:
-                from copilot.data.binance import fetch_ohlcv_with_delta
-                df = fetch_ohlcv_with_delta(symbol, tf, bars_needed, market="futures")
+                # P0-6: prefer the injected source (cache + mockable in tests)
+                if hasattr(self._source, "get_ohlc_with_delta"):
+                    df = self._source.get_ohlc_with_delta(symbol, tf, bars_needed)
+                else:
+                    from copilot.data.binance import fetch_ohlcv_with_delta
+                    df = fetch_ohlcv_with_delta(symbol, tf, bars_needed, market="futures")
             except Exception:
                 df = self._source.get_ohlc(symbol, tf, bars_needed)
         else:
@@ -821,17 +853,31 @@ def _evaluate_htf_conditions(
     current_bar_ts,
     registry: dict,
     htf_cache: dict,
+    tf_minutes: int = 60,
 ) -> bool:
-    """Evaluate all HTF conditions. Returns True only if all pass."""
+    """Evaluate all HTF conditions. Returns True only if all pass.
+
+    The decision moment is the current base-TF bar's CLOSE. Only HTF bars
+    whose own close is at or before that moment may be seen — the forming
+    HTF bar would repaint (look-ahead).
+    """
+    current_bar_close = current_bar_ts + pd.Timedelta(minutes=tf_minutes)
     for htf_cond in htf_conditions:
         htf_df = htf_dfs.get(htf_cond.htf_tf)
         if htf_df is None:
             return False
-        htf_slice = htf_df[htf_df.index <= current_bar_ts]
+        htf_minutes = _TF_MINUTES.get(htf_cond.htf_tf, 240)
+        htf_closes = htf_df.index + pd.Timedelta(minutes=htf_minutes)
+        htf_slice = htf_df[htf_closes <= current_bar_close]
         if htf_slice.empty:
             return False
         htf_bar_idx = len(htf_slice) - 1
-        cache_key = (htf_cond.htf_tf, htf_cond.detector, htf_bar_idx)
+        cache_key = (
+            htf_cond.htf_tf,
+            htf_cond.detector,
+            htf_bar_idx,
+            repr(sorted(htf_cond.kwargs.items())),
+        )
         if cache_key not in htf_cache:
             fn = registry.get(htf_cond.detector)
             if fn is None:
@@ -848,12 +894,36 @@ def _evaluate_htf_conditions(
     return True
 
 
-def _find_ltf_idx(ltf_df: pd.DataFrame, signal_ts) -> int:
-    """Return index of first LTF bar whose timestamp > signal_ts."""
-    mask = ltf_df.index > signal_ts
+def _find_ltf_idx(ltf_df: pd.DataFrame, cutoff_ts) -> int:
+    """Return index of first LTF bar opening at or after cutoff_ts.
+
+    cutoff_ts is the signal bar's close — the earliest moment the signal
+    can be acted on.
+    """
+    mask = ltf_df.index >= cutoff_ts
     if mask.any():
         return int(mask.argmax())
     return len(ltf_df)
+
+
+def _confirmed_tools(rule: SetupRule, include_ltf: bool = False) -> list[str]:
+    """Detectors whose conditions actually gated this entry (P0-6).
+
+    Previously this recorded signal_cache keys, which also contained
+    detectors called as SL/TP utilities (e.g. volume profile pulled in by
+    TP resolution) — polluting tool-effectiveness stats. Only condition
+    detectors belong here: base + HTF, plus LTF entry conditions when the
+    entry came through the LTF scan.
+    """
+    detectors = [c.detector for c in rule.conditions]
+    detectors += [c.detector for c in rule.htf_conditions]
+    if include_ltf:
+        detectors += [c.detector for c in rule.entry_conditions]
+    seen: list[str] = []
+    for d in detectors:
+        if d not in seen:
+            seen.append(d)
+    return seen
 
 
 def _make_trade_record(
@@ -898,6 +968,7 @@ def _finalize_trade(
     exit_ts: str | None,
     fee_bps: float = 0.0,
     original_sl: float | None = None,
+    slippage_bps: float = 0.0,
 ) -> TradeRecord:
     trade.exit_price = exit_price
     trade.ts_exit = exit_ts
@@ -919,13 +990,22 @@ def _finalize_trade(
                 trade.entry_price, trade.sl_price, exit_price, trade.direction
             )
 
-    # Change 5: apply fee model (uses original risk distance)
+    # Change 5 / P0-6: apply cost model (uses original risk distance).
+    # fee_bps and slippage_bps are PER SIDE — charged on entry notional and
+    # on exit notional (size-weighted across partial exits).
     effective_sl = original_sl if original_sl is not None else trade.sl_price
-    if fee_bps and trade.pnl_r is not None and trade.entry_price and effective_sl:
+    cost_bps = (fee_bps or 0.0) + (slippage_bps or 0.0)
+    if cost_bps and trade.pnl_r is not None and trade.entry_price and effective_sl:
         risk = abs(trade.entry_price - effective_sl)
         if risk > 0:
-            fee_r = (trade.entry_price * fee_bps / 10_000) / risk
-            trade.pnl_r = round(trade.pnl_r - fee_r, 4)
+            if trade.partial_exits:
+                exit_notional = sum(
+                    e["size_pct"] * e["exit_price"] for e in trade.partial_exits
+                )
+            else:
+                exit_notional = exit_price if exit_price is not None else trade.entry_price
+            cost_r = ((trade.entry_price + exit_notional) * cost_bps / 10_000) / risk
+            trade.pnl_r = round(trade.pnl_r - cost_r, 4)
 
     return trade
 

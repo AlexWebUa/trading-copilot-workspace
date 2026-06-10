@@ -72,6 +72,7 @@ def resolve_entry(
     df: pd.DataFrame,
     detector_cache: dict,
     max_wait_bars: int = 10,
+    direction: str | None = None,
 ) -> float | None:
     """
     Compute the actual entry price (or None/Ellipsis) based on entry_after mode.
@@ -106,6 +107,7 @@ def resolve_entry(
             df=df,
             detector_cache=detector_cache,
             max_wait_bars=max_wait_bars,
+            direction=direction,
         )
 
     if entry_after == "ob_midpoint":
@@ -116,6 +118,7 @@ def resolve_entry(
             df=df,
             detector_cache=detector_cache,
             max_wait_bars=max_wait_bars,
+            direction=direction,
         )
 
     # Unknown mode — fall back to next_open
@@ -134,6 +137,7 @@ def _scan_for_level(
     df: pd.DataFrame,
     detector_cache: dict,
     max_wait_bars: int,
+    direction: str | None = None,
 ) -> float | None:
     """
     Scan bars after the signal bar, looking for a wick that touches the target level.
@@ -143,7 +147,7 @@ def _scan_for_level(
     or None if the window expired or the level cannot be resolved.
     """
     # Resolve the target price from cached detector results
-    level = _resolve_limit_level(mode, detector_cache)
+    level = _resolve_limit_level(mode, detector_cache, direction)
     if level is None:
         return None  # can't determine level → cancel
 
@@ -168,13 +172,26 @@ def _scan_for_level(
     return _WAITING
 
 
-def _resolve_limit_level(mode: str, detector_cache: dict) -> float | None:
-    """Extract the limit entry price from cached detector results."""
+def _resolve_limit_level(
+    mode: str,
+    detector_cache: dict,
+    direction: str | None = None,
+) -> float | None:
+    """Extract the limit entry price from cached detector results.
+
+    P0-6: when direction is known, only zones of the matching polarity are
+    considered — a long must not fill at a bearish FVG/OB midpoint.
+    """
+    want_type = {"long": "bullish", "short": "bearish"}.get(direction or "")
+
     if mode == "fvg_ce":
         fvg_result = detector_cache.get("detect_fvg")
         if not fvg_result:
             return None
-        fvgs = fvg_result.get("fvgs", [])
+        fvgs = [
+            f for f in fvg_result.get("fvgs", [])
+            if want_type is None or f.get("type") == want_type
+        ]
         if not fvgs:
             return None
         fvg = fvgs[0]
@@ -188,7 +205,10 @@ def _resolve_limit_level(mode: str, detector_cache: dict) -> float | None:
         ob_result = detector_cache.get("detect_order_block")
         if not ob_result:
             return None
-        obs = ob_result.get("obs", [])
+        obs = [
+            o for o in ob_result.get("obs", [])
+            if want_type is None or o.get("type") == want_type
+        ]
         if not obs:
             return None
         ob = obs[0]

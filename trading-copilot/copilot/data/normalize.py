@@ -7,6 +7,8 @@ Columns: open, high, low, close, volume  (all float64)
 All detectors expect exactly this shape. Fixtures must use it too.
 """
 
+import time
+
 import pandas as pd
 
 OHLCV_COLUMNS = ["open", "high", "low", "close", "volume"]
@@ -18,9 +20,35 @@ _BINANCE_COLUMNS = [
     "taker_buy_base_vol", "taker_buy_quote_vol", "ignore",
 ]
 
+# close_time is field index 6 in each raw kline row
+_CLOSE_TIME_IDX = 6
 
-def normalize_binance(raw: list[list]) -> pd.DataFrame:
-    """Convert raw Binance klines list-of-lists to canonical DataFrame."""
+
+def _drop_forming(raw: list[list], include_forming: bool) -> list[list]:
+    """Drop the last kline if it hasn't closed yet (close_time in the future).
+
+    Binance always returns the in-progress candle as the final row. Analyzing
+    it violates the "entry only on candle CLOSE" rule — every signal computed
+    on it can repaint. Historical ranges are unaffected: their last kline is
+    already closed, so nothing is dropped.
+    """
+    if include_forming or not raw:
+        return raw
+    now_ms = int(time.time() * 1000)
+    if int(raw[-1][_CLOSE_TIME_IDX]) > now_ms:
+        return raw[:-1]
+    return raw
+
+
+def normalize_binance(raw: list[list], include_forming: bool = False) -> pd.DataFrame:
+    """Convert raw Binance klines list-of-lists to canonical DataFrame.
+
+    The forming (not yet closed) last candle is dropped unless
+    include_forming=True.
+    """
+    raw = _drop_forming(raw, include_forming)
+    if not raw:
+        return make_empty()
     df = pd.DataFrame(raw, columns=_BINANCE_COLUMNS)
     df = df[["open_time"] + OHLCV_COLUMNS].copy()
     for col in OHLCV_COLUMNS:
@@ -33,7 +61,7 @@ def normalize_binance(raw: list[list]) -> pd.DataFrame:
 DELTA_COLUMNS = ["buy_vol", "sell_vol", "delta"]
 
 
-def normalize_binance_with_delta(raw: list[list]) -> pd.DataFrame:
+def normalize_binance_with_delta(raw: list[list], include_forming: bool = False) -> pd.DataFrame:
     """Like normalize_binance but also includes buy_vol, sell_vol, delta columns.
 
     buy_vol  = taker_buy_base_vol  (aggressive market buys, Ask side)
@@ -41,7 +69,15 @@ def normalize_binance_with_delta(raw: list[list]) -> pd.DataFrame:
     delta    = buy_vol - sell_vol  (positive = buyers dominated)
 
     These come from the klines response directly — no approximation needed.
+    The forming (not yet closed) last candle is dropped unless
+    include_forming=True.
     """
+    raw = _drop_forming(raw, include_forming)
+    if not raw:
+        df = make_empty()
+        for col in DELTA_COLUMNS:
+            df[col] = pd.Series(dtype="float64")
+        return df
     df = pd.DataFrame(raw, columns=_BINANCE_COLUMNS)
     for col in OHLCV_COLUMNS + ["taker_buy_base_vol"]:
         df[col] = df[col].astype("float64")

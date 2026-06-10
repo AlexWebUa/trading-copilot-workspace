@@ -45,24 +45,15 @@ ORDERFLOW RULES — call these tools on every analysis and use them to validate 
      entries here are momentum plays; tighten SL to ATR:1.0.
 
 2. Cumulative Delta (detect_cumulative_delta):
-   - Call detect_cumulative_delta (period="session") whenever: (a) a wick/sweep was detected by
-     detect_liquidity, (b) a BOS just occurred, or (c) price is approaching a POI.
-   - Sweep validation: if sweep_confirmation.confirmed_manipulation=true, this is the HIGHEST-QUALITY
-     reversal signal — institutional print. Upgrade setup confidence. Note the sweep_side.
-   - If sweep_confirmation.confirmed_manipulation=false (delta agreed with sweep direction),
-     the sweep was likely genuine continuation — DOWNGRADE or skip the reversal setup.
-   - BOS validation: if delta_trend contradicts BOS direction (e.g., bullish BOS but delta_trend=negative),
-     flag the BOS as potentially fake — raise threshold for entry.
-   - Divergence: if divergences[0].type="bearish" at a premium POI → momentum exhaustion → short setup
-     is STRONGER. If divergences[0].type="bullish" at discount POI → accumulation signal → long setup STRONGER.
+   - Call detect_cumulative_delta (period="session") when a directional read on aggressive
+     flow would add context (e.g., before committing to a bias).
+   - Use session_delta / delta_trend as CONTEXT ONLY. If delta_trend contradicts BOS direction
+     (e.g., bullish BOS but delta_trend=negative), flag the BOS as potentially fake — raise
+     threshold for entry.
+   - Do NOT treat CD as sweep confirmation, divergence, or absorption evidence. Those signals
+     were removed pending rewrite — never upgrade setup confidence based on CD output.
 
-3. Absorption (check_cd_absorption):
-   - Call at POI to check for hidden buyers/sellers.
-   - If absorption_detected=true (high vol + small range + close near high), institutional
-     absorption is present → confirms the POI is active → highest-quality entry signal.
-   - absorption_detected=false at POI = no institutional activity confirmed → proceed with caution.
-
-4. Entry / SL / TP refinement using orderflow:
+3. Entry / SL / TP refinement using orderflow:
    - ENTRY: prefer FVG CE or OB midpoint that overlaps with an HVN (strongest structural entry).
    - SL: if OB is in HVN, place SL below the HVN low (not just below OB low) — structural stop.
      If price is in LVN and momentum entry, use ATR:1.0 stop.
@@ -112,9 +103,6 @@ Use exactly this markdown structure:
 | HVN on path to TP | yes (price) / no | TP1 resistance / clear path |
 | LVN at entry zone | yes / no | momentum accelerator / normal |
 | CD trend | positive / negative / neutral | CONFIRMS / DISPUTES direction |
-| CD divergence | bearish / bullish / none | exhaustion signal / none |
-| Sweep confirmation | yes (side) / no | MANIPULATION confirmed / clean |
-| Absorption at POI | yes (vol_ratio) / no | hidden buyers-sellers / none |
 
 **Orderflow verdict:** [CONFIRMS / DISPUTES / NEUTRAL] — [one sentence explaining the key orderflow signal and its impact on the setup]
 

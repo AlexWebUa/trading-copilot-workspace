@@ -102,6 +102,29 @@ class BinanceSource:
         self._cache.put(self.source_id, symbol, tf, bars, df)
         return df
 
+    def get_ohlc_with_delta(self, symbol: str, tf: str, bars: int = 200) -> pd.DataFrame:
+        """Like get_ohlc but with buy_vol/sell_vol/delta columns, cached.
+
+        P0-6: delta data goes through the same disk cache as plain OHLCV
+        (separate cache namespace so column sets don't collide).
+        """
+        assert_valid_tf(tf)
+        symbol = symbol.upper()
+        source_id = f"{self.source_id}_delta"
+
+        cached = self._cache.get(source_id, symbol, tf, bars)
+        if cached is not None:
+            return cached
+
+        interval = _TF_MAP[tf]
+        params = {"symbol": symbol, "interval": interval, "limit": min(bars, 1500)}
+        with httpx.Client(timeout=self._timeout) as client:
+            resp = client.get(f"{self._base_url}{self._endpoint}", params=params)
+            resp.raise_for_status()
+        df = normalize_binance_with_delta(resp.json())
+        self._cache.put(source_id, symbol, tf, bars, df)
+        return df
+
     def _fetch(self, symbol: str, tf: str, bars: int) -> pd.DataFrame:
         interval = _TF_MAP[tf]
         params = {"symbol": symbol, "interval": interval, "limit": min(bars, 1500)}
@@ -179,21 +202,12 @@ def fetch_ohlcv_with_delta(
     delta from Binance, no approximation or tick-data required.
 
     Returned columns: open, high, low, close, volume, buy_vol, sell_vol, delta
+
+    P0-6: thin wrapper around BinanceSource.get_ohlc_with_delta so the
+    delta path shares the disk cache. Prefer calling the method directly
+    when you already hold a BinanceSource.
     """
-    assert_valid_tf(tf)
-    symbol = symbol.upper()
-    interval = _TF_MAP[tf]
-
-    if market == "futures":
-        base_url, endpoint = _FUTURES_URL, _FUTURES_ENDPOINT
-    else:
-        base_url, endpoint = _SPOT_URL, _SPOT_ENDPOINT
-
-    params = {"symbol": symbol, "interval": interval, "limit": min(bars, 1500)}
-    with httpx.Client(timeout=10.0) as client:
-        resp = client.get(f"{base_url}{endpoint}", params=params)
-        resp.raise_for_status()
-    return normalize_binance_with_delta(resp.json())
+    return BinanceSource(market=market).get_ohlc_with_delta(symbol, tf, bars)
 
 
 _MAX_BATCHED_BARS = 100_000

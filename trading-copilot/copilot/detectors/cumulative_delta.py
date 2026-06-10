@@ -11,10 +11,11 @@ taker_buy_base_vol, so no tick-level data or aggTrades pagination is needed.
 
 Signals:
   - Session net delta + trend direction (positive / negative / neutral)
-  - Bearish divergence: price new high, CD not confirming
-  - Bullish divergence: price new low, CD not confirming
-  - Sweep confirmation: wick through a recent extreme, delta contradicts the
-    direction → manipulation signal (KB-aligned interpretation)
+
+Divergence and sweep-confirmation signals were removed in June 2026
+(Course Correction #2, PLAN.md P0-4): the last-bar-vs-fixed-lag divergence
+and the 0.2%-wick "sweep" check were shown by probes to fire on noise.
+They will return as swing-to-swing / pool-anchored implementations (P0-5).
 """
 
 from __future__ import annotations
@@ -25,11 +26,9 @@ TOOL_SCHEMA = {
     "name": "detect_cumulative_delta",
     "description": (
         "Compute Cumulative Delta (aggressive buy volume minus sell volume) "
-        "per bar using Binance klines taker data. Returns net session delta, "
-        "trend direction, divergence signals, and sweep confirmation. "
-        "Use to confirm or dispute a liquidity sweep — if CD did not rise "
-        "with a BSL sweep, manipulation is confirmed. Also use at POI to detect "
-        "hidden absorption before a reversal."
+        "per bar using Binance klines taker data. Returns net session delta "
+        "and trend direction. Use as directional context only — it does not "
+        "confirm sweeps or divergences."
     ),
     "input_schema": {
         "type": "object",
@@ -99,9 +98,6 @@ def detect_cumulative_delta(df: pd.DataFrame, period: str = "session") -> dict:
     else:
         delta_trend = "neutral"
 
-    divergences = _detect_divergences(ohlcv, cd)
-    sweep = _detect_sweep_signal(ohlcv, bar_delta)
-
     bars_out = [
         {
             "ts": ts.strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -111,16 +107,12 @@ def detect_cumulative_delta(df: pd.DataFrame, period: str = "session") -> dict:
         for ts, d, c in zip(ohlcv.index, bar_delta, cd)
     ][-50:]  # cap output at 50 bars
 
-    result: dict = {
+    return {
         "period": period,
         "session_delta": session_delta,
         "delta_trend": delta_trend,
-        "divergences": divergences,
         "bars": bars_out,
     }
-    if sweep:
-        result["sweep_confirmation"] = sweep
-    return result
 
 
 # ---------------------------------------------------------------------------
@@ -136,94 +128,6 @@ def _trim_period(df: pd.DataFrame, period: str) -> pd.DataFrame:
     return trimmed if len(trimmed) >= 3 else df
 
 
-def _detect_divergences(ohlcv: pd.DataFrame, cd: pd.Series, window: int = 10) -> list[dict]:
-    """Compare recent bars to bars N steps earlier for price/CD divergence."""
-    if len(ohlcv) < 4:
-        return []
-
-    divergences: list[dict] = []
-    n = min(window, len(ohlcv) - 2)
-
-    for lag in range(2, n + 1):
-        curr_high = float(ohlcv["high"].iloc[-1])
-        prev_high = float(ohlcv["high"].iloc[-lag])
-        curr_low = float(ohlcv["low"].iloc[-1])
-        prev_low = float(ohlcv["low"].iloc[-lag])
-        curr_cd = float(cd.iloc[-1])
-        prev_cd = float(cd.iloc[-lag])
-
-        # Bearish: price higher but CD lower
-        if curr_high > prev_high and curr_cd < prev_cd and not divergences:
-            divergences.append({
-                "type": "bearish",
-                "price_high": round(curr_high, 2),
-                "cd_at_high": round(curr_cd, 4),
-                "bar_ts": ohlcv.index[-1].strftime("%Y-%m-%dT%H:%M:%SZ"),
-                "context": "price_new_high_cd_falling",
-            })
-            break
-
-        # Bullish: price lower but CD higher
-        if curr_low < prev_low and curr_cd > prev_cd and not divergences:
-            divergences.append({
-                "type": "bullish",
-                "price_low": round(curr_low, 2),
-                "cd_at_low": round(curr_cd, 4),
-                "bar_ts": ohlcv.index[-1].strftime("%Y-%m-%dT%H:%M:%SZ"),
-                "context": "price_new_low_cd_rising",
-            })
-            break
-
-    return divergences
-
-
-def _detect_sweep_signal(
-    ohlcv: pd.DataFrame,
-    bar_delta: pd.Series,
-    lookback: int = 8,
-    wick_threshold: float = 0.002,
-) -> dict | None:
-    """Find the most recent bar that looks like a wick sweep and check if CD contradicts it."""
-    n = min(lookback, len(ohlcv) - 2)
-    if n < 1:
-        return None
-
-    for i in range(1, n + 1):
-        bar = ohlcv.iloc[-i]
-        ref = ohlcv.iloc[-(i + 4) : -i] if i + 4 <= len(ohlcv) else ohlcv.iloc[:-i]
-        if len(ref) == 0:
-            continue
-
-        delta_val = float(bar_delta.iloc[-i])
-        ts_str = ohlcv.index[-i].strftime("%Y-%m-%dT%H:%M:%SZ")
-        bar_range = float(bar["high"] - bar["low"])
-
-        # Buyside sweep: wick above ref highs, close returns below
-        upper_wick = float(bar["high"] - max(bar["open"], bar["close"]))
-        if (
-            float(bar["high"]) > float(ref["high"].max())
-            and bar_range > 0
-            and upper_wick / bar_range > wick_threshold
-        ):
-            return {
-                "last_sweep_ts": ts_str,
-                "sweep_side": "buyside",
-                "cd_at_sweep": round(delta_val, 4),
-                "confirmed_manipulation": delta_val < 0,  # swept high but sellers dominated
-            }
-
-        # Sellside sweep: wick below ref lows, close returns above
-        lower_wick = float(min(bar["open"], bar["close"]) - bar["low"])
-        if (
-            float(bar["low"]) < float(ref["low"].min())
-            and bar_range > 0
-            and lower_wick / bar_range > wick_threshold
-        ):
-            return {
-                "last_sweep_ts": ts_str,
-                "sweep_side": "sellside",
-                "cd_at_sweep": round(delta_val, 4),
-                "confirmed_manipulation": delta_val > 0,  # swept low but buyers dominated
-            }
-
-    return None
+# _detect_divergences and _detect_sweep_signal were deleted here (P0-4):
+# both compared only the last bar against fixed lags/thresholds and fired on
+# noise. Rewrite swing-to-swing / pool-anchored under P0-5.

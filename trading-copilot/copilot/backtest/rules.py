@@ -192,7 +192,12 @@ class SetupRule:
       Close trade after this many signal-TF bars. None = no limit.
 
     fee_bps:
-      Round-trip fee in basis points (e.g. 8.0 = 0.08%).
+      Fee in basis points PER SIDE (e.g. 4.0 = 0.04% taker).
+      Charged on both entry and exit notional.
+
+    slippage_bps:
+      Estimated slippage in basis points per side, applied like a fee
+      on entry and exit notional.
 
     risk_pct:
       Risk per trade as % of account for reporting. Default 1%.
@@ -217,8 +222,9 @@ class SetupRule:
     sl_after_tp1: str | None = None
     # Change 4: Time-based exit
     max_bars_open: int | None = None
-    # Change 5: Fee model
+    # Change 5: Fee model (per side; P0-6 June 2026: charged on entry AND exit)
     fee_bps: float = 0.0
+    slippage_bps: float = 0.0
     # Change 6: Variable risk
     risk_pct: float = 1.0
 
@@ -264,6 +270,7 @@ class SetupRule:
             "sl_after_tp1": self.sl_after_tp1,
             "max_bars_open": self.max_bars_open,
             "fee_bps": self.fee_bps,
+            "slippage_bps": self.slippage_bps,
             "risk_pct": self.risk_pct,
         }
 
@@ -287,6 +294,7 @@ class SetupRule:
             sl_after_tp1=d.get("sl_after_tp1"),
             max_bars_open=d.get("max_bars_open"),
             fee_bps=d.get("fee_bps", 0.0),
+            slippage_bps=d.get("slippage_bps", 0.0),
             risk_pct=d.get("risk_pct", 1.0),
         )
 
