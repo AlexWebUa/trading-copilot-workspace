@@ -147,8 +147,10 @@ P("liquidity: close-through break NOT misreported as wick sweep",
   not break_as_sweep,
   f"recent_sweeps={r['recent_sweeps'][:2]}")
 
-# True wick sweep: wick above 104, close back below
-rows2 = rows[:17]
+# True wick sweep: wick above 104, close back below.
+# rows[:16] = everything BEFORE the close-through break bar — a pool that
+# was already broken by close cannot be swept afterwards.
+rows2 = rows[:16]
 rows2 += [bar(101.5, 104.6, 101.3, 101.8)]           # wick sweep of 104, closes back
 rows2 += [bar(101.8, 102.2, 101.2, 101.6) for _ in range(3)]
 df = mkdf(rows2)

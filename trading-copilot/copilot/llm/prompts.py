@@ -50,8 +50,11 @@ ORDERFLOW RULES — call these tools on every analysis and use them to validate 
    - Use session_delta / delta_trend as CONTEXT ONLY. If delta_trend contradicts BOS direction
      (e.g., bullish BOS but delta_trend=negative), flag the BOS as potentially fake — raise
      threshold for entry.
-   - Do NOT treat CD as sweep confirmation, divergence, or absorption evidence. Those signals
-     were removed pending rewrite — never upgrade setup confidence based on CD output.
+   - divergences / sweep_confirmation are SECONDARY confluence, never the primary trigger.
+     A divergence may support a setup that already has structure + liquidity backing;
+     it must never upgrade confidence on its own. sweep_confirmation.confirmed_manipulation
+     corroborates a sweep already reported by detect_liquidity — if the two disagree,
+     trust detect_liquidity and say so in the report.
 
 3. Entry / SL / TP refinement using orderflow:
    - ENTRY: prefer FVG CE or OB midpoint that overlaps with an HVN (strongest structural entry).

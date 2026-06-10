@@ -11,24 +11,33 @@ taker_buy_base_vol, so no tick-level data or aggTrades pagination is needed.
 
 Signals:
   - Session net delta + trend direction (positive / negative / neutral)
-
-Divergence and sweep-confirmation signals were removed in June 2026
-(Course Correction #2, PLAN.md P0-4): the last-bar-vs-fixed-lag divergence
-and the 0.2%-wick "sweep" check were shown by probes to fire on noise.
-They will return as swing-to-swing / pool-anchored implementations (P0-5).
+  - Divergence (P0-5 rewrite): the window's CONFIRMED price extreme vs the
+    CD path. Bearish: price printed its highest high at bar i* (confirmed,
+    not the live bar) while CD had already peaked earlier and was lower at
+    i* — buyers did not back the new high. Bullish symmetric. The old
+    last-bar-vs-fixed-lag scan fired on noise and only at the right edge.
+  - Sweep confirmation (P0-5 rewrite): anchored to liquidity POOLS with
+    side semantics via detect_liquidity (wick beyond pool level + close
+    back). confirmed_manipulation=true when the sweep bar's delta
+    contradicts the sweep direction (buyside raid on sell-dominated flow).
+    A candle that CLOSES through the level is a break — never reported.
 """
 
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
+
+from copilot.detectors.liquidity import detect_liquidity
 
 TOOL_SCHEMA = {
     "name": "detect_cumulative_delta",
     "description": (
         "Compute Cumulative Delta (aggressive buy volume minus sell volume) "
-        "per bar using Binance klines taker data. Returns net session delta "
-        "and trend direction. Use as directional context only — it does not "
-        "confirm sweeps or divergences."
+        "per bar using Binance klines taker data. Returns net session delta, "
+        "trend direction, divergence at the confirmed price extreme, and "
+        "pool-anchored sweep confirmation. Secondary confluence only — "
+        "never the primary entry trigger."
     ),
     "input_schema": {
         "type": "object",
@@ -107,12 +116,17 @@ def detect_cumulative_delta(df: pd.DataFrame, period: str = "session") -> dict:
         for ts, d, c in zip(ohlcv.index, bar_delta, cd)
     ][-50:]  # cap output at 50 bars
 
-    return {
+    result: dict = {
         "period": period,
         "session_delta": session_delta,
         "delta_trend": delta_trend,
+        "divergences": _detect_divergences(ohlcv, cd.values),
         "bars": bars_out,
     }
+    sweep = _detect_sweep_confirmation(ohlcv, bar_delta.values)
+    if sweep:
+        result["sweep_confirmation"] = sweep
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -128,6 +142,86 @@ def _trim_period(df: pd.DataFrame, period: str) -> pd.DataFrame:
     return trimmed if len(trimmed) >= 3 else df
 
 
-# _detect_divergences and _detect_sweep_signal were deleted here (P0-4):
-# both compared only the last bar against fixed lags/thresholds and fired on
-# noise. Rewrite swing-to-swing / pool-anchored under P0-5.
+def _detect_divergences(ohlcv: pd.DataFrame, cd: np.ndarray) -> list[dict]:
+    """Divergence at the window's confirmed price extreme (P0-5, R5 fix).
+
+    Bearish: the bar with the window's highest high (i*, confirmed by at
+    least one later closed bar) printed while CD had already peaked at an
+    earlier bar and sat lower at i* — price made the high without buyer
+    backing. Bullish symmetric (lowest low while CD had bottomed earlier
+    and was higher at i*).
+
+    In an aligned trend CD keeps making its extreme AT the price extreme,
+    so no divergence fires — verified by test fixtures either way.
+    """
+    n = len(ohlcv)
+    if n < 6:
+        return []
+
+    highs = ohlcv["high"].values
+    lows = ohlcv["low"].values
+    tss = ohlcv.index
+    divergences: list[dict] = []
+
+    # Bearish: price extreme high, CD peaked earlier and is lower at i*
+    i_star = int(np.argmax(highs))
+    if i_star <= n - 2:  # confirmed: not the live right-edge bar
+        j = int(np.argmax(cd[: i_star + 1]))
+        if j < i_star and cd[i_star] < cd[j]:
+            divergences.append({
+                "type": "bearish",
+                "price_high": round(float(highs[i_star]), 2),
+                "cd_at_high": round(float(cd[i_star]), 4),
+                "bar_ts": tss[i_star].strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "context": "price_new_high_cd_falling",
+            })
+
+    # Bullish: price extreme low, CD bottomed earlier and is higher at i*
+    i_star = int(np.argmin(lows))
+    if i_star <= n - 2:
+        j = int(np.argmin(cd[: i_star + 1]))
+        if j < i_star and cd[i_star] > cd[j]:
+            divergences.append({
+                "type": "bullish",
+                "price_low": round(float(lows[i_star]), 2),
+                "cd_at_low": round(float(cd[i_star]), 4),
+                "bar_ts": tss[i_star].strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "context": "price_new_low_cd_rising",
+            })
+
+    return divergences
+
+
+def _detect_sweep_confirmation(ohlcv: pd.DataFrame, bar_delta: np.ndarray) -> dict | None:
+    """Most recent pool-anchored liquidity sweep + the delta verdict (R4/R5 fix).
+
+    Sweeps come from detect_liquidity: wick beyond a side-typed liquidity
+    pool with the candle closing back inside. confirmed_manipulation=true
+    when the sweep bar's delta contradicts the raid direction — a buyside
+    sweep printed on net selling (or sellside on net buying) is stop-hunt
+    fuel, not genuine demand.
+    """
+    liq = detect_liquidity(ohlcv[["open", "high", "low", "close", "volume"]])
+    sweeps = liq.get("recent_sweeps") or []
+    if not sweeps:
+        return None
+
+    latest = sweeps[0]  # newest-first
+    ts_strs = [str(ts) for ts in ohlcv.index]
+    try:
+        bar_i = ts_strs.index(latest["sweep_ts"])
+    except ValueError:
+        return None
+
+    delta_val = float(bar_delta[bar_i])
+    if latest["side"] == "buyside":
+        confirmed = delta_val < 0  # swept the highs while sellers dominated
+    else:
+        confirmed = delta_val > 0  # swept the lows while buyers dominated
+
+    return {
+        "last_sweep_ts": ohlcv.index[bar_i].strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "sweep_side": latest["side"],
+        "cd_at_sweep": round(delta_val, 4),
+        "confirmed_manipulation": confirmed,
+    }

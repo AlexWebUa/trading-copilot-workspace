@@ -1,34 +1,25 @@
 """
-Break of Structure (BOS) / Confirmed BOS (cBOS) detector.
-
-Algorithm mirrors smc.py (github.com/joshyattridge/smart-money-concepts) §bos_choch().
+Break of Structure (BOS) / Confirmed BOS (cBOS) detector — thin wrapper
+over `smartmoneyconcepts` smc.bos_choch (P0-3, June 2026).
 
 Terminology:
 - BOS  : break in the trend direction (continuation).
-         Bullish: [low,high,low,high] with HL+HH — close above prior high B.
-         Bearish: [high,low,high,low] with LH+LL  — close below prior low  B.
-- cBOS : structural shift / Change of Character (CHoCH in smc).
-         Bullish: [low,high,low,high] with LL+HH — reversal from bear to bull.
-         Bearish: [high,low,high,low] with HH+LL — reversal from bull to bear.
+- cBOS : structural shift / Change of Character (CHoCH in smc terms).
 
-Detection (per smc.py §bos_choch):
-  For each 4-swing window [A,B,C,D] with the right alternating type pattern:
-    1. Classify BOS or cBOS based on price relationships (same conditions as detect_market_structure).
-    2. Level to break = B (the 2nd swing — prior extreme in the trend direction).
-    3. Break bar = first bar AFTER C where close crosses B, up to and including D.
-       Using boundary swings (see _add_boundary_swings) D may land at bar n-1, so the
-       search naturally covers all remaining bars — equivalent to smc's "search to end".
-    4. Only confirmed breaks (break bar found) are emitted as events.
+The library scans 4-swing windows over its own swing detection and emits
+an event only when a candle CLOSE actually breaks the level (close_break).
+Unconfirmed setups are dropped — there is no wick-driven or right-edge
+synthetic event (June audit root causes R1/R2 for the old implementation).
 
-Boundary swings (from _find_swings) are essential: the in-progress leg at the right
-edge of the chart is never a confirmed swing, so without them the last window is
-incomplete and no BOS fires on the current move.
+Verified empirically against the June 2026 probe fixtures: the textbook
+bullish BOS (close above prior swing high after a higher low) is emitted
+at the correct level, and a flat market produces no events.
 """
 
 import numpy as np
 import pandas as pd
 
-from copilot.detectors.market_structure import _find_swings
+from copilot.detectors.smc_lib import lib_swings, structure_events, true_range_atr
 
 TOOL_SCHEMA = {
     "name": "detect_bos",
@@ -53,17 +44,6 @@ TOOL_SCHEMA = {
 }
 
 
-def _find_break_bar(closes, start: int, end: int, level: float, direction: str) -> int | None:
-    """Return first index in [start..end] where close breaks level, or None."""
-    end = min(end, len(closes) - 1)
-    for i in range(start, end + 1):
-        if direction == "above" and closes[i] > level:
-            return i
-        if direction == "below" and closes[i] < level:
-            return i
-    return None
-
-
 def detect_bos(
     df: pd.DataFrame,
     swing_lookback: int = 5,
@@ -80,82 +60,32 @@ def detect_bos(
             "latest_bias": "none",
         }
 
-    opens_arr = df["open"].values
-    closes_arr = df["close"].values
-    tss = df.index
+    shl = lib_swings(df, swing_lookback)
+    raw_events = structure_events(df, shl)  # oldest-first by break_idx
 
-    atr_arr = (df["high"] - df["low"]).rolling(14).mean().values
-
-    def _atr_at(i: int) -> float:
-        v = atr_arr[i]
-        if np.isnan(v):
-            v = float(np.nanmean(atr_arr[: i + 1]))
-        return v if v > 0 else 1.0
-
-    # _find_swings = raw + dedup + boundary guards (mirrors smc.py §swing_highs_lows).
-    # Boundary swings ensure the in-progress leg at the right edge is included in the
-    # 4-swing window so BOS fires on the current move, not only on historical ones.
-    swings = _find_swings(df, swing_lookback)
-
-    if len(swings) < 4:
+    if not raw_events:
         return {"events": [], "count": 0, "latest_bias": "none"}
 
+    opens_arr = df["open"].values
+    closes_arr = df["close"].values
+    atr_arr = true_range_atr(df)
+    tss = df.index
+
     events: list[dict] = []
+    for ev in raw_events:
+        j = ev["break_idx"]
+        body = abs(closes_arr[j] - opens_arr[j])
+        atr_val = float(atr_arr[j]) if atr_arr[j] > 0 else 1.0
+        events.append({
+            "type": ev["type"],
+            "direction": ev["direction"],
+            "broken_level": round(ev["level"], 2),
+            "break_ts": tss[j].isoformat(),
+            "break_candle_body_atr": round(body / atr_val, 2),
+        })
 
-    for w in range(len(swings) - 3):
-        A, B, C, D = swings[w], swings[w + 1], swings[w + 2], swings[w + 3]
-        types = [A["type"], B["type"], C["type"], D["type"]]
-
-        # --- Bullish: [low, high, low, high] ---
-        # Level to break = B (prior swing high).
-        # BOS : C > A (HL) and D > B (HH) — continuation.
-        # cBOS: C < A (LL) and D > B (HH) — reversal / Change of Character.
-        if types == ["low", "high", "low", "high"]:
-            level = B["price"]
-            if D["price"] <= level:
-                # D must exceed the prior high for there to be any break candidate.
-                continue
-            bos_type = "BOS" if C["price"] > A["price"] else "cBOS"
-            # Search for first close above B in (C, D] — mirrors smc.py close_break logic.
-            # D may be a synthetic boundary at bar n-1, so this naturally covers all
-            # remaining bars (equivalent to smc's unbounded "search to end").
-            break_idx = _find_break_bar(closes_arr, C["idx"] + 1, D["idx"], level, "above")
-            if break_idx is None:
-                continue
-            body = abs(closes_arr[break_idx] - opens_arr[break_idx])
-            atr_val = _atr_at(break_idx)
-            events.append({
-                "type": bos_type,
-                "direction": "bullish",
-                "broken_level": round(level, 2),
-                "break_ts": tss[break_idx].isoformat(),
-                "break_candle_body_atr": round(body / atr_val, 2),
-            })
-
-        # --- Bearish: [high, low, high, low] ---
-        # Level to break = B (prior swing low).
-        # BOS : C < A (LH) and D < B (LL) — continuation.
-        # cBOS: C > A (HH) and D < B (LL) — reversal / Change of Character.
-        elif types == ["high", "low", "high", "low"]:
-            level = B["price"]
-            if D["price"] >= level:
-                continue
-            bos_type = "BOS" if C["price"] < A["price"] else "cBOS"
-            break_idx = _find_break_bar(closes_arr, C["idx"] + 1, D["idx"], level, "below")
-            if break_idx is None:
-                continue
-            body = abs(closes_arr[break_idx] - opens_arr[break_idx])
-            atr_val = _atr_at(break_idx)
-            events.append({
-                "type": bos_type,
-                "direction": "bearish",
-                "broken_level": round(level, 2),
-                "break_ts": tss[break_idx].isoformat(),
-                "break_candle_body_atr": round(body / atr_val, 2),
-            })
-
-    events_out = list(reversed(events))[:max_results]
-    latest_bias = events[-1]["direction"] if events else "none"
+    events_out = list(reversed(events))[:max_results]  # newest-first
+    latest_bias = events[-1]["direction"]
     return {
         "events": events_out,
         "count": len(events_out),

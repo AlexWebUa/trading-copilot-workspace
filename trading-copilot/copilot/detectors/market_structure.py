@@ -1,24 +1,28 @@
 """
-Market structure detector: tracks HH/HL (bullish) vs LH/LL (bearish) swing sequence.
+Market structure detector — thin wrapper over `smartmoneyconcepts` (P0-3).
 
-Algorithm mirrors smc.py (github.com/joshyattridge/smart-money-concepts):
-- swing_highs_lows(): centered rolling window + iterative deduplication to strict H/L/H/L
-- bos_choch(): 4-swing sliding window [A,B,C,D]; BOS = trend-continuation, CHoCH = reversal
+State = direction of the most recent CONFIRMED structure event from
+smc.bos_choch (close-break only). This fixes the June 2026 audit findings:
+  - an HH/HL uptrend in a normal pullback stays "bullish" (no event has
+    flipped it) instead of reading "ranging";
+  - a wick dip cannot flip state — only a candle CLOSE through a
+    structural level produces an event (R2 eliminated).
 
-Key insight (smc.py §swing_highs_lows, final block):
-  The in-progress move at the right edge of the chart is never a confirmed swing because
-  it has no future bars to confirm it.  smc adds a *synthetic* boundary swing at the first
-  and last bar using the bar's actual high/low so the current trend leg is always included
-  in the window analysis.
-
-State machine (last 4 alternating swings after boundary fix):
-- Bullish: [low,high,low,high] with HL+HH (BOS) or LL+HH (cBOS structural shift)
-- Bearish: [high,low,high,low] with LH+LL (BOS) or HH+LL (cBOS structural shift)
-- Ranging: mixed or insufficient data.
+The legacy swing helpers (_find_raw_swings & co.) are kept below: the
+order-block detector and debug tooling consume raw confirmed swings
+chronologically (Working Rules: dedup must never erase a broken swing).
+detect_market_structure itself no longer uses them.
 """
 
 import numpy as np
 import pandas as pd
+
+from copilot.detectors.smc_lib import (
+    confirmed_swings,
+    lib_swings,
+    structure_events,
+    true_range_atr,
+)
 
 TOOL_SCHEMA = {
     "name": "detect_market_structure",
@@ -150,12 +154,11 @@ def _add_boundary_swings(swings: list[dict], df: pd.DataFrame) -> list[dict]:
 
 
 def _find_swings(df: pd.DataFrame, lookback: int) -> list[dict]:
-    """
-    Full swing pipeline: raw detection → deduplication → boundary guards.
+    """LEGACY (pre P0-3): raw detection → deduplication → boundary guards.
 
-    This is the canonical entry point for all detectors that need swing points.
-    Do NOT call _find_raw_swings + _deduplicate_swings separately in new code;
-    use this function to ensure boundary swings are always included.
+    Kept only for debug tooling. New detector code uses smc_lib for
+    structure (lib_swings/structure_events) or _find_raw_swings directly
+    when broken swings must survive (order blocks, R1).
     """
     return _add_boundary_swings(_deduplicate_swings(_find_raw_swings(df, lookback)), df)
 
@@ -177,48 +180,26 @@ def detect_market_structure(df: pd.DataFrame, swing_lookback: int = 5) -> dict:
         }
 
     tss = df.index
+    shl = lib_swings(df, swing_lookback)
+    swings = confirmed_swings(shl, df)
+    events = structure_events(df, shl)
 
-    # raw_dedup: confirmed real swings only (no boundary) — used for last_h/last_l labels
-    # and bars_in_state (distance from last *confirmed* swing to current bar).
-    raw_dedup = _deduplicate_swings(_find_raw_swings(df, swing_lookback))
+    last_h = next((s for s in reversed(swings) if s["type"] == "high"), None)
+    last_l = next((s for s in reversed(swings) if s["type"] == "low"), None)
 
-    # swings: with boundary guards — used for state-machine pattern matching.
-    swings = _add_boundary_swings(raw_dedup, df)
-
-    # Last confirmed (real) swing highs/lows for output labels
-    last_h = next((s for s in reversed(raw_dedup) if s["type"] == "high"), None)
-    last_l = next((s for s in reversed(raw_dedup) if s["type"] == "low"),  None)
-
-    state = "ranging"
-    last_bos_type = None
-
-    if len(swings) >= 4:
-        last4 = swings[-4:]
-        types = [s["type"] for s in last4]
-        A, B, C, D = [s["price"] for s in last4]
-
-        # Bullish: [low, high, low, high]
-        if types == ["low", "high", "low", "high"]:
-            if C > A and D > B:          # HL + HH → trend continuation BOS
-                state = "bullish"
-                last_bos_type = "BOS"
-            elif C < A and D > B:        # LL + HH → structural reversal cBOS
-                state = "bullish"
-                last_bos_type = "cBOS"
-
-        # Bearish: [high, low, high, low]
-        elif types == ["high", "low", "high", "low"]:
-            if C < A and D < B:          # LH + LL → trend continuation BOS
-                state = "bearish"
-                last_bos_type = "BOS"
-            elif C > A and D < B:        # HH + LL → structural reversal cBOS
-                state = "bearish"
-                last_bos_type = "cBOS"
+    if events:
+        latest = events[-1]
+        state = latest["direction"]
+        last_bos_type = latest["type"]
+        # State began when the break candle CLOSED through the level
+        bars_in_state = len(df) - 1 - latest["break_idx"]
+    else:
+        state = "ranging"
+        last_bos_type = None
+        bars_in_state = len(df) - 1 - swings[-1]["idx"] if swings else 0
 
     current_price = float(df["close"].iloc[-1])
-    atr = float((df["high"] - df["low"]).rolling(14).mean().iloc[-1])
-    # bars_in_state: distance from last *confirmed* swing to now
-    bars_in_state = len(df) - 1 - raw_dedup[-1]["idx"] if raw_dedup else 0
+    atr = float(true_range_atr(df)[-1])
 
     return {
         "state": state,

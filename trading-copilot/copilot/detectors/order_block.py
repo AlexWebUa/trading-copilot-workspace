@@ -110,21 +110,23 @@ def detect_order_block(
         }
 
     # ── Import swing helpers (internal, not detectors) ────────────────────────
-    from copilot.detectors.market_structure import (
-        _find_raw_swings,
-        _deduplicate_swings,
-    )
+    from copilot.detectors.market_structure import _find_raw_swings
 
     opens, highs, lows, closes, tss = extract_arrays(df)
     atr           = calc_atr(df)
     n             = len(df)
     current_price = float(closes[-1])
 
-    # Confirmed real swings only — no synthetic boundary swings.
-    # Boundary swings represent the in-progress move and are not yet structural events.
-    raw_dedup    = _deduplicate_swings(_find_raw_swings(df, swing_lookback))
-    swing_highs  = [s for s in raw_dedup if s["type"] == "high"]   # sorted by idx asc
-    swing_lows   = [s for s in raw_dedup if s["type"] == "low"]
+    # Confirmed RAW swings, consumed chronologically — NO deduplication.
+    # P0-3 / root cause R1: alternation-dedup merges consecutive same-type
+    # swings and can erase the very swing whose break defines the OB (e.g.
+    # price breaks a swing high before a pullback low confirms — the broken
+    # high would be deleted in favor of the newer, higher one). Verified
+    # empirically that smc.ob inherits this flaw, so the swing-break scan
+    # below runs on raw confirmed swings instead.
+    raw_swings   = _find_raw_swings(df, swing_lookback)
+    swing_highs  = [s for s in raw_swings if s["type"] == "high"]   # sorted by idx asc
+    swing_lows   = [s for s in raw_swings if s["type"] == "low"]
 
     scan_start    = max(0, n - lookback)
     obs: list[dict] = []

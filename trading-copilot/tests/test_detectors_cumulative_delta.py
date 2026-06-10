@@ -98,21 +98,74 @@ def test_bars_contain_required_keys():
 
 
 # ---------------------------------------------------------------------------
-# P0-4 quarantine — broken signals must NOT appear in output
+# P0-5 — divergence at the confirmed price extreme (probe 3 fixture)
 # ---------------------------------------------------------------------------
 
-def test_divergence_and_sweep_signals_removed():
-    """June 2026 audit: divergence and sweep-confirmation logic fired on noise
-    and was removed pending a swing-to-swing rewrite (P0-5). The output must
-    not contain those keys, even on data that used to trigger them."""
-    # Fixture that used to produce a bearish divergence
-    price_offsets = [0.0] * 18 + [0.5, 2.0]
-    deltas = [10.0] * 18 + [10.0, -15.0]
-    df = _make_df(bars=20, deltas=deltas, price_offset=price_offsets)
-    result = detect_cumulative_delta(df, period="all")
+def _bar(o, h, l, c, delta):
+    buy = (100.0 + delta) / 2
+    return {
+        "open": o, "high": h, "low": l, "close": c, "volume": 100.0,
+        "buy_vol": buy, "sell_vol": 100.0 - buy, "delta": delta,
+    }
 
-    assert "divergences" not in result
+
+def _mk(rows):
+    ts = [
+        datetime(2026, 1, 1, tzinfo=timezone.utc) + timedelta(hours=i)
+        for i in range(len(rows))
+    ]
+    return pd.DataFrame(rows, index=pd.DatetimeIndex(ts, tz="UTC", name="ts"))
+
+
+def test_bearish_divergence_at_confirmed_extreme():
+    """Probe 3 (June 2026): price prints its highest high two bars back while
+    CD peaked earlier and was falling — divergence must fire even though the
+    LAST bar is not the extreme (the old code only looked at the last bar)."""
+    rows = [_bar(100, 101, 99, 100.5, 10) for _ in range(20)]
+    rows.append(_bar(100.5, 105, 100.4, 104.5, 500))   # push high, strong delta
+    rows.append(_bar(104.5, 105.2, 103.0, 103.5, 50))  # top 1, CD peaks (750)
+    rows.append(_bar(103.5, 105.3, 103.2, 103.6, -200))  # top 2: HH, CD 550 < 750
+    rows.append(_bar(103.6, 103.8, 102.5, 102.8, -50))
+    rows.append(_bar(102.8, 103.0, 102.0, 102.2, -30))   # last bar, not the extreme
+    result = detect_cumulative_delta(_mk(rows), period="all")
+
+    bearish = [d for d in result["divergences"] if d["type"] == "bearish"]
+    assert len(bearish) == 1
+    assert bearish[0]["price_high"] == pytest.approx(105.3, abs=0.01)
+    assert bearish[0]["context"] == "price_new_high_cd_falling"
+
+
+def test_no_divergence_when_cd_confirms_the_high():
+    """Aligned trend: CD makes its maximum AT the price extreme → no signal."""
+    rows = [_bar(100 + i, 101 + i, 99 + i, 100.5 + i, 10) for i in range(20)]
+    result = detect_cumulative_delta(_mk(rows), period="all")
+    assert result["divergences"] == []
+
+
+def test_breakout_not_labeled_sweep():
+    """Probe 2 (June 2026): a bar that CLOSES above prior highs on positive
+    delta is a breakout, not a sweep — no sweep_confirmation."""
+    rows = [_bar(100 + i*0.1, 100.5 + i*0.1, 99.5 + i*0.1, 100.2 + i*0.1, 60)
+            for i in range(30)]
+    rows.append(_bar(103.2, 106.02, 103.0, 106.0, 60))  # closes at the top
+    result = detect_cumulative_delta(_mk(rows), period="all")
     assert "sweep_confirmation" not in result
+
+
+def test_pool_sweep_on_selling_flow_is_manipulation():
+    """A wick raid above a confirmed swing high that closes back below it,
+    printed on net-selling delta → confirmed_manipulation=True."""
+    rows = [_bar(100, 101, 99, 100.5, 10) for _ in range(10)]
+    rows.append(_bar(100.5, 104, 100.4, 103.5, 10))          # swing high 104
+    rows += [_bar(103.5, 103.8, 101.0, 101.5, 10) for _ in range(5)]
+    rows.append(_bar(101.5, 104.6, 101.3, 101.8, -40))       # wick sweep, sellers
+    rows += [_bar(101.8, 102.2, 101.2, 101.6, 5) for _ in range(3)]
+    result = detect_cumulative_delta(_mk(rows), period="all")
+
+    sweep = result.get("sweep_confirmation")
+    assert sweep is not None
+    assert sweep["sweep_side"] == "buyside"
+    assert sweep["confirmed_manipulation"] is True
 
 
 # ---------------------------------------------------------------------------
