@@ -1,17 +1,29 @@
 #!/usr/bin/env python3
 """
 debug_detectors.py — fetch BTCUSDT spot data, run every detector,
-and write one .pine file per detector for TradingView visual debugging.
+and write one .pine file (+ one .json raw-result file) per detector
+for TradingView visual debugging.
 
 Usage (from trading-copilot/ directory):
     python scripts/debug_detectors.py                          # all detectors
     python scripts/debug_detectors.py --tf 1h --bars 500      # custom TF/bars
     python scripts/debug_detectors.py --detector detect_fvg   # single detector
-    python scripts/debug_detectors.py --list                   # show all names
+    python scripts/debug_detectors.py --swing-lookback 3      # swing sensitivity
+    python scripts/debug_detectors.py --list                   # names + audit status
 
 Each output file can be pasted directly into TradingView:
     Pine Script Editor → New indicator → paste → Save → Add to chart
     (Switch chart to BTCUSDT and the matching timeframe first.)
+
+The .json file next to each .pine holds the raw detector output —
+cross-check every drawn level against it when verifying a detector.
+
+Post P0-3/P0-5 (June 2026): market_structure / bos / order_block /
+liquidity / cumulative_delta visualize the rewritten implementations
+(smartmoneyconcepts-backed; structure events are close-break confirmed).
+Detectors still quarantined from the LLM tool list are runnable here for
+manual inspection but are tagged QUARANTINED — their output is known-bad
+until their P2 rewrite lands.
 
 Visual style: B&W design system (matches pine_script.py).
   c_fvg_fill     #f7525f 15%  — FVG / IFVG fill
@@ -24,6 +36,7 @@ Visual style: B&W design system (matches pine_script.py).
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
@@ -86,6 +99,33 @@ _ALL_DETECTOR_NAMES: list[str] = [
     "current_killzone",
     "check_multi_tf_alignment",
 ]
+
+# Verification status per the June 2026 audit + P0-3/P0-5 rewrites.
+# "REWRITTEN" = new implementation, needs fresh visual verification.
+# "QUARANTINED" = removed from the LLM tool list, output known-bad (P2 rewrite).
+_DETECTOR_STATUS: dict[str, str] = {
+    "detect_fvg": "ok (audit-verified)",
+    "detect_ifvg": "ok (audit-verified)",
+    "detect_volume_profile": "ok (audit-verified)",
+    "detect_market_structure": "REWRITTEN P0-3 — verify: state flips only on close-break events",
+    "detect_bos": "REWRITTEN P0-3 — verify: every event line ends at a close through it",
+    "detect_order_block": "REWRITTEN P0-3 — verify: OB = lowest-low/highest-high before the break",
+    "detect_liquidity": "REWRITTEN P0-3 — verify: sweeps only at side-matching pools, close-back",
+    "detect_cumulative_delta": "REWRITTEN P0-5 — verify: divergence at confirmed extreme; sweep = pool-anchored",
+    "detect_fractals": "caveat: is_swept = any trade past level (P2-1)",
+    "detect_fib_zones": "caveat: long-only OTE, no direction param (P2-1)",
+    "detect_rejection_block": "caveat: fires without body-engulf (P2-1)",
+    "detect_mitigation_block": "caveat: old 2-candle OB predicate (P2-2)",
+    "detect_breaker_block": "caveat: demands FVG pierce, misses close-through (P2-2)",
+    "detect_sponsored_candle": "rebuilt sweep anchoring pending (P2-2)",
+    "detect_compression": "QUARANTINED — fires on random walks (P2)",
+    "check_absorption_at_poi": "QUARANTINED — broken volume threshold (P2)",
+    "check_cd_divergence_at_structure": "QUARANTINED — last-bar divergence logic (P2)",
+    "current_killzone": "caveat: weekend gate missing (P2-1)",
+    "check_multi_tf_alignment": "caveat: two disjoint code paths (P2-1)",
+}
+
+_QUARANTINED = {n for n, s in _DETECTOR_STATUS.items() if s.startswith("QUARANTINED")}
 
 # Detectors that need buy_vol/sell_vol/delta columns
 _NEEDS_DELTA: frozenset[str] = frozenset({
@@ -582,34 +622,35 @@ def _pine_volume_profile(result: dict, bars: int, future_bars: int) -> list[str]
 
 # ── Market Structure ──────────────────────────────────────────────────────────
 
-def _pine_market_structure(result: dict, df: pd.DataFrame, future_bars: int) -> list[str]:
+def _pine_market_structure(
+    result: dict, df: pd.DataFrame, future_bars: int, swing_lookback: int = 5
+) -> list[str]:
     """
-    Full swing history: every confirmed swing point + trend transitions.
+    Draws EXACTLY what the rewritten detector computes (P0-3):
+    confirmed library swings + close-break structure events from
+    smc.bos_choch. No re-derived state machine — if the chart disagrees
+    with the detector output, that IS the bug being looked for.
 
     B&W style:
       Swing highs  — c_structure triangle-down markers
-      Swing lows   — c_structure triangle-up markers
-      Bullish transition — c_structure label (black = positive/neutral)
-      Bearish transition — c_fvg_line label  (red = alert)
-      Last SwH/SwL lines — c_structure dotted
+      Swing lows   — c_block_active triangle-up markers
+      Event line   — swing → break bar at the broken level (2px BOS, 1px cBOS)
+      Bullish event label — c_structure (black), bearish — c_fvg_line (red)
+      Last SwH/SwL lines — dotted
     """
     if result.get("status"):
         return _nothing(f"Market structure: {result['status']}")
 
-    from copilot.detectors.market_structure import (
-        _find_raw_swings,
-        _deduplicate_swings,
-        _add_boundary_swings,
-    )
+    from copilot.detectors.smc_lib import confirmed_swings, lib_swings, structure_events
 
-    swing_lookback = 5
-    raw_dedup = _deduplicate_swings(_find_raw_swings(df, swing_lookback))
-    swings    = _add_boundary_swings(raw_dedup, df)
-    n         = len(df)
+    shl    = lib_swings(df, swing_lookback)
+    swings = confirmed_swings(shl, df)
+    events = structure_events(df, shl)
+    n      = len(df)
     lines: list[str] = []
 
-    # ── 1. Confirmed swing markers ────────────────────────────────────────────
-    for s in raw_dedup:
+    # ── 1. Confirmed swing markers (boundary synthetics excluded) ────────────
+    for s in swings:
         age   = max(1, n - 1 - s["idx"])
         price = round(s["price"], 2)
         if s["type"] == "high":
@@ -625,40 +666,27 @@ def _pine_market_structure(result: dict, df: pd.DataFrame, future_bars: int) -> 
                 f'style=label.style_triangleup, size=size.tiny)'
             )
 
-    # ── 2. Trend transition labels ────────────────────────────────────────────
-    prev_state = "ranging"
-    for w in range(len(swings) - 3):
-        A, B, C, D = swings[w], swings[w + 1], swings[w + 2], swings[w + 3]
-        types       = [x["type"] for x in (A, B, C, D)]
-        Ap, Bp, Cp, Dp = A["price"], B["price"], C["price"], D["price"]
-        state    = "ranging"
-        bos_kind = None
-
-        if types == ["low", "high", "low", "high"]:
-            if Cp > Ap and Dp > Bp:
-                state, bos_kind = "bullish", "BOS"
-            elif Cp < Ap and Dp > Bp:
-                state, bos_kind = "bullish", "cBOS"
-        elif types == ["high", "low", "high", "low"]:
-            if Cp < Ap and Dp < Bp:
-                state, bos_kind = "bearish", "BOS"
-            elif Cp > Ap and Dp < Bp:
-                state, bos_kind = "bearish", "cBOS"
-
-        if state != "ranging" and state != prev_state:
-            d_age   = max(1, n - 1 - D["idx"])
-            d_price = round(Dp, 2)
-            # Bullish = c_structure (black), Bearish = c_fvg_line (red)
-            color = "c_structure" if state == "bullish" else "c_fvg_line"
-            style = "label.style_label_up" if state == "bullish" else "label.style_label_down"
-            tag   = f"{bos_kind} {state}"
-            lines.append(
-                f'    label.new(bar_index-{d_age}, {d_price}, "{tag}", '
-                f'color={color}, textcolor=color.white, style={style}, size=size.small)'
-            )
-
-        if state != "ranging":
-            prev_state = state
+    # ── 2. Structure events: line from the swing to the break bar ────────────
+    # Verify manually: the line must END at a candle whose CLOSE crossed the
+    # level. A wick touching it must not produce an event.
+    for i, ev in enumerate(events):
+        age_swing = max(1, n - 1 - ev["swing_idx"])
+        age_break = max(1, n - 1 - ev["break_idx"])
+        level     = round(ev["level"], 2)
+        width     = 2 if ev["type"] == "BOS" else 1
+        color     = "c_structure" if ev["direction"] == "bullish" else "c_fvg_line"
+        style     = ("label.style_label_up" if ev["direction"] == "bullish"
+                     else "label.style_label_down")
+        arrow     = "↑" if ev["direction"] == "bullish" else "↓"
+        lines.append(
+            f'    line.new(bar_index-{age_swing}, {level}, bar_index-{age_break}, {level}, '
+            f'color={color}, style=line.style_solid, width={width})'
+        )
+        lines.append(
+            f'    label.new(bar_index-{age_break}, {level}, '
+            f'"{ev["type"]}{arrow} #{i+1} @{level}", '
+            f'color={color}, textcolor=color.white, style={style}, size=size.tiny)'
+        )
 
     # ── 3. Last SwH / SwL dotted extension lines ──────────────────────────────
     sh = result.get("last_swing_high") or {}
@@ -996,13 +1024,34 @@ def _pine_cumulative_delta(result: dict, df: pd.DataFrame, future_bars: int) -> 
             continue
         age   = _ts_to_age(df, bar_ts)
         # Both divergence types = c_fvg_line (red = disagreement between price and delta)
+        # P0-5 semantics to verify: the marker must sit on the window's price
+        # extreme (confirmed, never the live bar), with CD already declining
+        # (bearish) / rising (bullish) into it.
         style = "label.style_triangledown" if dtype == "bearish" else "label.style_triangleup"
         lines.append(
             f'    label.new(bar_index-{age}, {price}, "CD div {dtype}", '
             f'color=c_fvg_line, textcolor=color.white, style={style}, size=size.small)'
         )
+
+    # P0-5 sweep confirmation — pool-anchored, close-back. Verify: the marked
+    # bar must WICK beyond a liquidity pool and close back inside; a bar that
+    # closed through the level must never carry this marker.
+    sweep = result.get("sweep_confirmation")
+    if sweep and sweep.get("last_sweep_ts"):
+        age   = _ts_to_age(df, sweep["last_sweep_ts"])
+        side  = sweep.get("sweep_side", "?")
+        manip = sweep.get("confirmed_manipulation", False)
+        cd_at = sweep.get("cd_at_sweep", 0)
+        col   = "c_fvg_line" if manip else "c_block_active"
+        lines.append(
+            f'    label.new(bar_index-{age}, high[{age}], '
+            f'"SWEEP {side} | delta:{cd_at:+.1f} | manip:{"YES" if manip else "no"}", '
+            f'color={col}, textcolor=color.white, '
+            f'style=label.style_label_down, size=size.small)'
+        )
+
     if len(lines) == 1:
-        lines.append(_nothing("No CD divergences")[0])
+        lines.append(_nothing("No CD divergences / sweeps")[0])
     return lines
 
 
@@ -1130,14 +1179,18 @@ def main() -> None:
     parser.add_argument("--out",      default="./pine_debug", help="Output directory (default: ./pine_debug)")
     parser.add_argument("--detector", default=None, metavar="NAME",
                         help="Run only this detector (default: run all).\nSee available names with --list.")
+    parser.add_argument("--swing-lookback", default=None, type=int, metavar="N",
+                        help="Swing pivot sensitivity for market_structure / bos /\n"
+                             "order_block / liquidity (default: each detector's own default).")
     parser.add_argument("--list",     action="store_true",
-                        help="Print all available detector names and exit.")
+                        help="Print all detector names with their June-2026 audit status and exit.")
     args = parser.parse_args()
 
     if args.list:
-        print("Available detectors:")
+        print("Available detectors (status per June 2026 audit / P0 rewrites):")
+        width = max(len(n) for n in _ALL_DETECTOR_NAMES) + 2
         for name in _ALL_DETECTOR_NAMES:
-            print(f"  {name}")
+            print(f"  {name:<{width}}{_DETECTOR_STATUS.get(name, '')}")
         return
 
     selected: str | None = args.detector
@@ -1156,6 +1209,14 @@ def main() -> None:
     future_bars = args.future
     out_dir     = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Swing sensitivity: explicit flag overrides; otherwise each detector's
+    # own default is used (5 for ms/bos/ob, 3 for liquidity) so the debug
+    # output matches what the MCP tools return.
+    ms_lookback = args.swing_lookback or 5
+    sl_kwargs: dict = (
+        {"swing_lookback": args.swing_lookback} if args.swing_lookback else {}
+    )
 
     htf = _HTF_MAP.get(tf, "4h")
 
@@ -1195,7 +1256,7 @@ def main() -> None:
             lambda r: _pine_fvg(r, future_bars)),
 
         ("detect_order_block",
-            lambda: detect_order_block(df),
+            lambda: detect_order_block(df, **sl_kwargs),
             lambda r: _pine_order_block(r, future_bars)),
 
         ("detect_ifvg",
@@ -1215,11 +1276,11 @@ def main() -> None:
             lambda r: _pine_mitigation_block(r, future_bars)),
 
         ("detect_liquidity",
-            lambda: detect_liquidity(df),
+            lambda: detect_liquidity(df, **sl_kwargs),
             lambda r: _pine_liquidity(r, df, future_bars)),
 
         ("detect_bos",
-            lambda: detect_bos(df, max_results=30),
+            lambda: detect_bos(df, max_results=30, **sl_kwargs),
             lambda r: _pine_bos(r, df, future_bars)),
 
         ("detect_volume_profile",
@@ -1227,8 +1288,8 @@ def main() -> None:
             lambda r: _pine_volume_profile(r, bars, future_bars)),
 
         ("detect_market_structure",
-            lambda: detect_market_structure(df),
-            lambda r: _pine_market_structure(r, df, future_bars)),
+            lambda: detect_market_structure(df, **sl_kwargs),
+            lambda r: _pine_market_structure(r, df, future_bars, ms_lookback)),
 
         ("detect_fractals",
             lambda: detect_fractals(df),
@@ -1301,28 +1362,41 @@ def main() -> None:
             pine  = _assemble(hdr, body)
             fname = f"{name}_{symbol}_{tf}.pine"
             (out_dir / fname).write_text(pine, encoding="utf-8")
+            # Raw detector output — cross-check every drawn level against it
+            jname = f"{name}_{symbol}_{tf}.json"
+            (out_dir / jname).write_text(
+                json.dumps(result, default=str, indent=2), encoding="utf-8"
+            )
             status = result.get("status", "ok")
             count_key = next(
                 (k for k in ("count_active", "count", "compressions") if k in result), None
             )
             count_str = f" ({result[count_key]} zones)" if count_key and isinstance(result.get(count_key), int) else ""
-            print(f"  OK     {fname}  [{status}{count_str}]")
+            q_tag = "  ⚠ QUARANTINED — output known-bad" if name in _QUARANTINED else ""
+            print(f"  OK     {fname}  [{status}{count_str}]{q_tag}")
             saved += 1
         except Exception as exc:
             print(f"  ERROR  {name}: {exc}")
             errors += 1
 
     print(f"\n{'─'*60}")
-    print(f"Saved {saved} Pine Script files → {out_dir.resolve()}")
+    print(f"Saved {saved} Pine Script files (+ raw .json each) → {out_dir.resolve()}")
     if errors:
         print(f"Errors: {errors}")
     print(
-        "\nHow to use:"
+        "\nHow to verify a detector:"
         "\n  1. Open TradingView and switch the chart to "
         f"{symbol} {tf}"
-        "\n  2. Open Pine Script Editor → New indicator → paste file content → Save"
-        "\n  3. Click 'Add to chart' — zones appear on the last bar"
-        "\n  4. Load one file per detector tab for side-by-side comparison"
+        "\n  2. Pine Script Editor → New indicator → paste the .pine content → Save"
+        "\n  3. 'Add to chart' — zones appear anchored to the last bar"
+        "\n  4. Cross-check each drawn level against the .json raw output"
+        "\n  5. Check the verification hint per detector: --list shows what to look for"
+        "\n\nRewritten detectors to re-verify first (P0-3/P0-5):"
+        "\n  detect_market_structure  — state flips ONLY on a candle CLOSE through a level"
+        "\n  detect_bos               — every event line ends at a close-break candle"
+        "\n  detect_order_block       — OB candle = deepest retracement before the break"
+        "\n  detect_liquidity         — sweeps: wick beyond pool + close back; breaks excluded"
+        "\n  detect_cumulative_delta  — divergence at confirmed extreme; sweep is pool-anchored"
     )
 
 

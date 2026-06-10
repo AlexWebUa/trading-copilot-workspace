@@ -1,0 +1,12 @@
+# Generated debug artifacts (debug_detectors.py output)
+pine_debug/
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Local env
+.env
+.venv/
+.venv_mcp/
