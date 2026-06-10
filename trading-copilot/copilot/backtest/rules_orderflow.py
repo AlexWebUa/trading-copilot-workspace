@@ -32,8 +32,8 @@ _ob_in_hvn_long = SetupRule(
     direction="long",
     conditions=[
         Condition("detect_market_structure", "state", "eq", "bullish"),
-        Condition("detect_bos", "direction", "eq", "bullish"),
-        Condition("detect_bos", "type", "not_in", ["none"]),
+        Condition("detect_bos", "latest_bias", "eq", "bullish"),
+        Condition("detect_bos", "count", "gt", 0),
         Condition("detect_fvg", "count_active", "gt", 0),
         Condition("detect_fvg", "fvgs.0.type", "eq", "bullish"),
         Condition("detect_sponsored_candle", "count", "gt", 0),
@@ -55,9 +55,9 @@ _poc_discount_bos_long = SetupRule(
     direction="long",
     conditions=[
         Condition("detect_market_structure", "state", "eq", "bullish"),
-        Condition("detect_bos", "direction", "eq", "bullish"),
-        Condition("detect_bos", "type", "not_in", ["none"]),
-        Condition("detect_bos", "displacement_atr_multiple", "gte", 1.0),
+        Condition("detect_bos", "latest_bias", "eq", "bullish"),
+        Condition("detect_bos", "count", "gt", 0),
+        Condition("detect_bos", "events.0.break_candle_body_atr", "gte", 1.0),
         Condition("detect_fvg", "count_active", "gt", 0),
         Condition("detect_fvg", "fvgs.0.type", "eq", "bullish"),
         Condition("check_poc_location", "in_discount", "true"),
@@ -77,9 +77,9 @@ _lvn_acceleration_long = SetupRule(
     direction="long",
     conditions=[
         Condition("detect_market_structure", "state", "eq", "bullish"),
-        Condition("detect_bos", "direction", "eq", "bullish"),
-        Condition("detect_bos", "type", "not_in", ["none"]),
-        Condition("detect_bos", "displacement_atr_multiple", "gte", 1.5),
+        Condition("detect_bos", "latest_bias", "eq", "bullish"),
+        Condition("detect_bos", "count", "gt", 0),
+        Condition("detect_bos", "events.0.break_candle_body_atr", "gte", 1.5),
         Condition("check_price_in_lvn", "in_lvn", "true"),
     ],
     entry_after="next_open",
@@ -96,8 +96,8 @@ _vah_rejection_short = SetupRule(
     direction="short",
     conditions=[
         Condition("detect_market_structure", "state", "in", ["bearish", "ranging"]),
-        Condition("detect_bos", "direction", "eq", "bearish"),
-        Condition("detect_bos", "type", "not_in", ["none"]),
+        Condition("detect_bos", "latest_bias", "eq", "bearish"),
+        Condition("detect_bos", "count", "gt", 0),
         Condition("detect_fvg", "count_active", "gt", 0),
         Condition("detect_fvg", "fvgs.0.type", "eq", "bearish"),
         Condition("check_poc_location", "in_premium", "true"),
@@ -123,8 +123,8 @@ _sweep_cd_manipulation_long = SetupRule(
     direction="long",
     conditions=[
         Condition("detect_market_structure", "state", "eq", "bullish"),
-        Condition("detect_bos", "direction", "eq", "bullish"),
-        Condition("detect_bos", "type", "not_in", ["none"]),
+        Condition("detect_bos", "latest_bias", "eq", "bullish"),
+        Condition("detect_bos", "count", "gt", 0),
         Condition("detect_fvg", "count_active", "gt", 0),
         Condition("detect_fvg", "fvgs.0.type", "eq", "bullish"),
         # CD manipulation: sweep + contradicting delta → institutional print
@@ -145,9 +145,9 @@ _bos_cd_confluence_long = SetupRule(
     direction="long",
     conditions=[
         Condition("detect_market_structure", "state", "eq", "bullish"),
-        Condition("detect_bos", "direction", "eq", "bullish"),
-        Condition("detect_bos", "type", "not_in", ["none"]),
-        Condition("detect_bos", "displacement_atr_multiple", "gte", 1.0),
+        Condition("detect_bos", "latest_bias", "eq", "bullish"),
+        Condition("detect_bos", "count", "gt", 0),
+        Condition("detect_bos", "events.0.break_candle_body_atr", "gte", 1.0),
         Condition("detect_fvg", "count_active", "gt", 0),
         Condition("detect_fvg", "fvgs.0.type", "eq", "bullish"),
         # CD agrees with BOS direction → volume-backed break
@@ -168,8 +168,8 @@ _cd_divergence_ob_short = SetupRule(
     direction="short",
     conditions=[
         Condition("detect_market_structure", "state", "in", ["bearish", "ranging"]),
-        Condition("detect_bos", "direction", "eq", "bearish"),
-        Condition("detect_bos", "type", "not_in", ["none"]),
+        Condition("detect_bos", "latest_bias", "eq", "bearish"),
+        Condition("detect_bos", "count", "gt", 0),
         Condition("detect_sponsored_candle", "count", "gt", 0),
         Condition("detect_sponsored_candle", "candles.0.ob_type", "eq", "bearish"),
         Condition("detect_sponsored_candle", "candles.0.is_mitigated", "false"),
@@ -224,8 +224,8 @@ _compression_vp_break_long = SetupRule(
         # Compression: squeeze preceding the expansion
         Condition("detect_compression", "active", "true"),
         # Strong BOS breaking out of the compression (≥2.0 ATR displacement)
-        Condition("detect_bos", "direction", "eq", "bullish"),
-        Condition("detect_bos", "displacement_atr_multiple", "gte", 2.0),
+        Condition("detect_bos", "latest_bias", "eq", "bullish"),
+        Condition("detect_bos", "events.0.break_candle_body_atr", "gte", 2.0),
         # LVN: price in thin-volume zone after breakout (momentum expected)
         Condition("check_price_in_lvn", "in_lvn", "true"),
         # CD confirms the expansion with rising buying pressure
