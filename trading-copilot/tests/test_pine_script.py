@@ -62,7 +62,7 @@ class TestGeneratePineScript:
         result = generate_pine_script(bullish_trend_df)
         assert "summary" in result
         summary = result["summary"]
-        for key in ("fvgs", "obs", "ifvgs", "breakers", "bsl_pools", "ssl_pools", "bos"):
+        for key in ("fvgs", "obs", "ifvgs", "breakers", "bsl_pools", "ssl_pools", "bos_events"):
             assert key in summary, f"Missing key: {key}"
 
     def test_zone_count_is_non_negative(self, bullish_trend_df):

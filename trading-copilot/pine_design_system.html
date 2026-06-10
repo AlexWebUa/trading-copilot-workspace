@@ -1,0 +1,778 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Trading Co-Pilot · Pine Script Design System v2</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: #111;
+  color: #bbb;
+  font-family: 'SF Mono', 'Fira Code', 'Courier New', monospace;
+  font-size: 12px;
+  padding: 28px;
+  line-height: 1.5;
+}
+header { border-bottom: 1px solid #2a2a2a; padding-bottom: 14px; margin-bottom: 24px; }
+header h1 { font-size: 13px; color: #fff; text-transform: uppercase; letter-spacing: 3px; }
+header p { color: #555; font-size: 10px; margin-top: 4px; }
+
+h2 {
+  font-size: 9px; color: #444; text-transform: uppercase; letter-spacing: 2px;
+  margin: 28px 0 12px; padding-bottom: 6px; border-bottom: 1px solid #1e1e1e;
+}
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+.grid-4 { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 10px; }
+
+.card { background: #181818; border: 1px solid #242424; border-radius: 3px; overflow: hidden; }
+.card-header {
+  padding: 6px 10px; border-bottom: 1px solid #202020;
+  font-size: 9px; color: #666; text-transform: uppercase; letter-spacing: 1px;
+  display: flex; justify-content: space-between; align-items: center;
+}
+.tag { background: #202020; padding: 1px 5px; border-radius: 2px; font-size: 8px; color: #444; }
+.card-body { padding: 10px; }
+canvas { display: block; }
+
+.spec { display: flex; justify-content: space-between; padding: 2px 0; font-size: 9px; border-bottom: 1px solid #1c1c1c; }
+.spec-k { color: #444; }
+.spec-v { color: #888; }
+.spec-ok { color: #3a6b2a; }
+
+.swatch-row { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
+.swatch { width: 28px; height: 16px; border-radius: 2px; border: 1px solid #2a2a2a; flex-shrink: 0; }
+.swatch-name { color: #777; font-size: 10px; }
+.swatch-hex { color: #444; font-size: 9px; margin-left: auto; }
+
+.full-wrap { background: #181818; border: 1px solid #242424; border-radius: 3px; padding: 10px; }
+.legend {
+  display: flex; flex-wrap: wrap; gap: 14px; padding: 8px 10px;
+  background: #141414; border-top: 1px solid #202020;
+}
+.legend-item { display: flex; align-items: center; gap: 5px; font-size: 9px; color: #555; }
+.note { background: #141a10; border: 1px solid #263318; border-radius: 3px; padding: 8px 10px; font-size: 10px; color: #5a8040; margin-top: 10px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Trading Co-Pilot · Pine Script Design System</h1>
+  <p>v2.1 · B&amp;W Theme · All decisions resolved · Ready for implementation</p>
+</header>
+
+<!-- ── 01 COLOR SCHEME ─────────────────────────────────────── -->
+<h2>01 · Color Scheme — Black &amp; White Preset</h2>
+<div class="grid-4">
+  <div class="card">
+    <div class="card-header">Background <span class="tag">chart</span></div>
+    <div class="card-body">
+      <div style="background:#cacaca;height:36px;border-radius:2px;margin-bottom:8px;"></div>
+      <div class="spec"><span class="spec-k">hex</span><span class="spec-v">#cacaca</span></div>
+      <div class="spec"><span class="spec-k">opacity</span><span class="spec-v">100%</span></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">Bull Candle <span class="tag">long</span></div>
+    <div class="card-body">
+      <div style="background:rgba(202,202,202,0.75);height:36px;border:1px solid #000;border-radius:2px;margin-bottom:8px;"></div>
+      <div class="spec"><span class="spec-k">body fill</span><span class="spec-v">#cacaca 75%</span></div>
+      <div class="spec"><span class="spec-k">border + wick</span><span class="spec-v">#000 100%</span></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">Bear Candle <span class="tag">short</span></div>
+    <div class="card-body">
+      <div style="background:rgba(0,0,0,0.75);height:36px;border:1px solid #000;border-radius:2px;margin-bottom:8px;"></div>
+      <div class="spec"><span class="spec-k">body fill</span><span class="spec-v">#000 75%</span></div>
+      <div class="spec"><span class="spec-k">border + wick</span><span class="spec-v">#000 100%</span></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">Indicator Palette <span class="tag">overlay</span></div>
+    <div class="card-body">
+      <div class="swatch-row">
+        <div class="swatch" style="background:rgba(247,82,95,0.15);border-color:#f7525f;"></div>
+        <span class="swatch-name">FVG / IFVG fill</span>
+        <span class="swatch-hex">#f7525f 15%</span>
+      </div>
+      <div class="swatch-row">
+        <div class="swatch" style="background:#f7525f;"></div>
+        <span class="swatch-name">FVG center line</span>
+        <span class="swatch-hex">#f7525f 100%</span>
+      </div>
+      <div class="swatch-row">
+        <div class="swatch" style="background:rgba(74,74,74,0.15);border-color:#4a4a4a;"></div>
+        <span class="swatch-name">Blocks (active)</span>
+        <span class="swatch-hex">#4a4a4a 15%</span>
+      </div>
+      <div class="swatch-row">
+        <div class="swatch" style="background:rgba(74,74,74,0.05);border-color:#3a3a3a;"></div>
+        <span class="swatch-name">Blocks (mitigated)</span>
+        <span class="swatch-hex">#4a4a4a 5%</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── 02 INDICATORS ──────────────────────────────────────── -->
+<h2>02 · Indicators</h2>
+<div class="grid-3">
+
+  <!-- FVG -->
+  <div class="card">
+    <div class="card-header">FVG — Fair Value Gap <span class="tag">imbalance</span></div>
+    <div class="card-body">
+      <canvas id="c-fvg" height="110"></canvas>
+      <div style="margin-top:8px;">
+        <div class="spec"><span class="spec-k">fill</span><span class="spec-v">#f7525f 15%, no border</span></div>
+        <div class="spec"><span class="spec-k">center line</span><span class="spec-v">#f7525f solid 1px</span></div>
+        <div class="spec"><span class="spec-k">left edge</span><span class="spec-v">C0 right wick (= C1 open)</span></div>
+        <div class="spec"><span class="spec-k">bottom</span><span class="spec-v">C0.high (pre-impulse wick)</span></div>
+        <div class="spec"><span class="spec-k">top</span><span class="spec-v">min(Ci.low) пока фитиль не пробил C0.high</span></div>
+        <div class="spec"><span class="spec-k">multi-candle</span><span class="spec-v">N свечей, не только 3 — пока зазор не закрыт</span></div>
+        <div class="spec"><span class="spec-k">extends</span><span class="spec-v">→ current bar</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- IFVG -->
+  <div class="card">
+    <div class="card-header">IFVG — Inverted FVG <span class="tag">imbalance</span></div>
+    <div class="card-body">
+      <canvas id="c-ifvg" height="110"></canvas>
+      <div style="margin-top:8px;">
+        <div class="spec"><span class="spec-k">fill</span><span class="spec-v">#f7525f 15%</span></div>
+        <div class="spec"><span class="spec-k">border</span><span class="spec-ok">✓ dashed #f7525f 1px</span></div>
+        <div class="spec"><span class="spec-k">no center line</span><span class="spec-v">distinguishes from FVG</span></div>
+        <div class="spec"><span class="spec-k">extends</span><span class="spec-v">→ current bar</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- BOS / cBOS -->
+  <div class="card">
+    <div class="card-header">BOS / cBOS — Break of Structure <span class="tag">structure</span></div>
+    <div class="card-body">
+      <canvas id="c-bos" height="110"></canvas>
+      <div style="margin-top:8px;">
+        <div class="spec"><span class="spec-k">BOS</span><span class="spec-ok">✓ #000 solid 2px</span></div>
+        <div class="spec"><span class="spec-k">cBOS</span><span class="spec-ok">✓ #000 solid 1px</span></div>
+        <div class="spec"><span class="spec-k">from</span><span class="spec-v">fractal level (swing H/L)</span></div>
+        <div class="spec"><span class="spec-k">to</span><span class="spec-v">break candle body (close)</span></div>
+        <div class="spec"><span class="spec-k">label</span><span class="spec-v">BOS / cBOS — param toggle</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Liquidity unswept -->
+  <div class="card">
+    <div class="card-header">Liquidity — Unswept <span class="tag">BSL / SSL</span></div>
+    <div class="card-body">
+      <canvas id="c-liq-u" height="110"></canvas>
+      <div style="margin-top:8px;">
+        <div class="spec"><span class="spec-k">line</span><span class="spec-v">#000 dashed 1px</span></div>
+        <div class="spec"><span class="spec-k">from</span><span class="spec-v">fractal formation bar</span></div>
+        <div class="spec"><span class="spec-k">to</span><span class="spec-v">→ current bar (extends)</span></div>
+        <div class="spec"><span class="spec-k">swing markers</span><span class="spec-v">debug mode only ▲▼</span></div>
+        <div class="spec"><span class="spec-k">label</span><span class="spec-v">EQH / EQL / BSL / SSL — param</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Liquidity swept -->
+  <div class="card">
+    <div class="card-header">Liquidity — Swept (Raid) <span class="tag">BSL / SSL</span></div>
+    <div class="card-body">
+      <canvas id="c-liq-s" height="110"></canvas>
+      <div style="margin-top:8px;">
+        <div class="spec"><span class="spec-k">line</span><span class="spec-v">#000 solid 1px</span></div>
+        <div class="spec"><span class="spec-k">from</span><span class="spec-v">fractal bar → sweep bar</span></div>
+        <div class="spec"><span class="spec-k">marker</span><span class="spec-v">╳ at midpoint</span></div>
+        <div class="spec"><span class="spec-k">after sweep</span><span class="spec-v">line ends, no extension</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Blocks -->
+  <div class="card">
+    <div class="card-header">Blocks — OB / SC / BB / MB / RB <span class="tag">POI</span></div>
+    <div class="card-body">
+      <canvas id="c-blocks" height="110"></canvas>
+      <div style="margin-top:8px;">
+        <div class="spec"><span class="spec-k">active</span><span class="spec-ok">✓ #4a4a4a 15%, no border</span></div>
+        <div class="spec"><span class="spec-k">mitigated</span><span class="spec-ok">✓ #4a4a4a 5% (stays visible)</span></div>
+        <div class="spec"><span class="spec-k">bull vs bear</span><span class="spec-ok">✓ same color #4a4a4a</span></div>
+        <div class="spec"><span class="spec-k">extends</span><span class="spec-v">→ current bar if unmitigated</span></div>
+        <div class="spec"><span class="spec-k">label</span><span class="spec-v">OB / SC / BB / MB / RB — param</span></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- Volume Profile row -->
+<div style="margin-top:10px;" class="grid-2">
+
+  <!-- VP -->
+  <div class="card">
+    <div class="card-header">Volume Profile <span class="tag">orderflow</span></div>
+    <div class="card-body">
+      <canvas id="c-vp" height="110"></canvas>
+      <div style="margin-top:8px;">
+        <div class="spec"><span class="spec-k">style</span><span class="spec-ok">✓ horizontal bars, right side (TV-style)</span></div>
+        <div class="spec"><span class="spec-k">POC</span><span class="spec-v">#f7525f bar, dashed line across chart</span></div>
+        <div class="spec"><span class="spec-k">VAH / VAL</span><span class="spec-v">dashed #888 lines across chart</span></div>
+        <div class="spec"><span class="spec-k">HVN bars</span><span class="spec-v">#4a4a4a 60% opacity</span></div>
+        <div class="spec"><span class="spec-k">LVN bars</span><span class="spec-v">#4a4a4a 20% opacity</span></div>
+        <div class="spec"><span class="spec-k">panel width</span><span class="spec-v">~15% of chart right side</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Debug / Parameters note -->
+  <div class="card">
+    <div class="card-header">Script Parameters <span class="tag">config</span></div>
+    <div class="card-body" style="padding-top:14px;">
+      <div class="spec"><span class="spec-k">show_labels</span><span class="spec-v">bool, default true</span></div>
+      <div class="spec"><span class="spec-k">show_swing_markers</span><span class="spec-v">bool, default false (debug)</span></div>
+      <div class="spec"><span class="spec-k">show_mitigated</span><span class="spec-v">bool, default true (5% fill)</span></div>
+      <div class="spec"><span class="spec-k">show_vp</span><span class="spec-v">bool, default true</span></div>
+      <div class="spec"><span class="spec-k">fvg_min_width_atr</span><span class="spec-v">float, default 0.15</span></div>
+      <div class="spec"><span class="spec-k">lookback_bars</span><span class="spec-v">int, default 200</span></div>
+      <div class="spec" style="margin-top:6px;"><span class="spec-k">color_scheme</span><span class="spec-v">"bw" | (future presets)</span></div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ── 03 COMBINED VIEW ───────────────────────────────────── -->
+<h2>03 · Combined View — All Indicators</h2>
+<div class="full-wrap">
+  <canvas id="c-full" height="300"></canvas>
+  <div class="legend">
+    <div class="legend-item">
+      <svg width="14" height="14"><rect x="0" y="0" width="14" height="14" fill="rgba(247,82,95,0.35)" rx="1"/></svg>
+      FVG (red center line)
+    </div>
+    <div class="legend-item">
+      <svg width="14" height="14"><rect x="0" y="0" width="14" height="14" fill="rgba(247,82,95,0.15)" stroke="#f7525f" stroke-width="1" stroke-dasharray="2,2" rx="1"/></svg>
+      IFVG (dashed border)
+    </div>
+    <div class="legend-item">
+      <svg width="14" height="14"><rect x="0" y="0" width="14" height="14" fill="rgba(74,74,74,0.25)" rx="1"/></svg>
+      Block active (15%)
+    </div>
+    <div class="legend-item">
+      <svg width="14" height="14"><rect x="0" y="0" width="14" height="14" fill="rgba(74,74,74,0.08)" rx="1"/></svg>
+      Block mitigated (5%)
+    </div>
+    <div class="legend-item">
+      <svg width="24" height="10"><line x1="0" y1="5" x2="24" y2="5" stroke="#000" stroke-width="2"/></svg>
+      BOS (2px)
+    </div>
+    <div class="legend-item">
+      <svg width="24" height="10"><line x1="0" y1="5" x2="24" y2="5" stroke="#000" stroke-width="1"/></svg>
+      cBOS (1px)
+    </div>
+    <div class="legend-item">
+      <svg width="24" height="10"><line x1="0" y1="5" x2="24" y2="5" stroke="#000" stroke-width="1" stroke-dasharray="3,3"/></svg>
+      Liquidity unswept
+    </div>
+    <div class="legend-item">
+      <svg width="28" height="10">
+        <line x1="0" y1="5" x2="28" y2="5" stroke="#000" stroke-width="1"/>
+        <line x1="10" y1="1" x2="18" y2="9" stroke="#000" stroke-width="1.5"/>
+        <line x1="18" y1="1" x2="10" y2="9" stroke="#000" stroke-width="1.5"/>
+      </svg>
+      Swept
+    </div>
+    <div class="legend-item">
+      <svg width="14" height="14"><rect x="0" y="0" width="14" height="14" fill="rgba(247,82,95,0.2)" rx="1"/></svg>
+      VP POC bar
+    </div>
+  </div>
+</div>
+
+<div class="note" style="margin-top:10px;">
+  ⚑ Debug mode (<code>show_swing_markers=true</code>): adds ▲▼ triangle markers on each confirmed swing high/low for detector verification.
+</div>
+
+<script>
+const DPR = window.devicePixelRatio || 1;
+
+function init(id, h) {
+  const el = document.getElementById(id);
+  const w = el.parentElement.clientWidth - 20;
+  el.width = w * DPR; el.height = h * DPR;
+  el.style.width = w + 'px'; el.style.height = h + 'px';
+  const ctx = el.getContext('2d');
+  ctx.scale(DPR, DPR);
+  ctx.W = w; ctx.H = h;
+  return ctx;
+}
+
+function bg(ctx) {
+  ctx.fillStyle = '#cacaca';
+  ctx.fillRect(0, 0, ctx.W, ctx.H);
+}
+
+function mkScale(data, padPct = 0.10) {
+  const ps = data.flatMap(c => [c.h, c.l]);
+  const mn = Math.min(...ps), mx = Math.max(...ps);
+  const pad = (mx - mn) * padPct;
+  return {
+    mn: mn - pad, mx: mx + pad,
+    y(p, H) { return H - (p - this.mn) / (this.mx - this.mn) * H; }
+  };
+}
+
+function drawCandles(ctx, data, sc, cw) {
+  const bw = cw * 0.64;
+  data.forEach((c, i) => {
+    const cx = i * cw + cw / 2;
+    const bull = c.c >= c.o;
+    const top = sc.y(Math.max(c.o, c.c), ctx.H);
+    const bot = sc.y(Math.min(c.o, c.c), ctx.H);
+    const wt  = sc.y(c.h, ctx.H);
+    const wb  = sc.y(c.l, ctx.H);
+    ctx.strokeStyle = '#000'; ctx.lineWidth = 0.75;
+    ctx.beginPath(); ctx.moveTo(cx, wt); ctx.lineTo(cx, wb); ctx.stroke();
+    ctx.fillStyle = bull ? 'rgba(202,202,202,0.75)' : 'rgba(0,0,0,0.75)';
+    const bh = Math.max(bot - top, 1);
+    ctx.fillRect(cx - bw/2, top, bw, bh);
+    ctx.strokeRect(cx - bw/2, top, bw, bh);
+  });
+}
+
+function dash(ctx, on) { ctx.setLineDash(on ? [4, 4] : []); }
+
+// ── FVG ─────────────────────────────────────────────────────────────────────
+(function() {
+  const ctx = init('c-fvg', 110);
+  const data = [
+    {o:100,h:101,l:99.5,c:100.5},
+    {o:100.5,h:101.5,l:100,c:101},
+    {o:101,h:101.9,l:100.4,c:101.4},   // C0 (idx 2)
+    {o:101.4,h:107,l:101.1,c:106.5},   // C1 impulse (idx 3)
+    {o:106.5,h:107.2,l:103.7,c:104.2}, // C2 (idx 4) → FVG: 101.9..103.7
+    {o:104.2,h:105,l:103.8,c:104.7},
+    {o:104.7,h:105.5,l:104.2,c:105.1},
+    {o:105.1,h:106,l:104.8,c:105.7},
+  ];
+  const sc = mkScale(data);
+  const cw = ctx.W / data.length;
+  bg(ctx);
+
+  // FVG left edge = right edge of C0 = C1's left edge = cw * 3
+  const c0Idx = 2;
+  const fx = cw * (c0Idx + 1); // = cw * 3
+  const ft = sc.y(103.7, ctx.H), fb = sc.y(101.9, ctx.H), fm = (ft + fb) / 2;
+
+  ctx.fillStyle = 'rgba(247,82,95,0.15)';
+  ctx.fillRect(fx, ft, ctx.W - fx, fb - ft);
+  ctx.strokeStyle = '#f7525f'; ctx.lineWidth = 1; dash(ctx, false);
+  ctx.beginPath(); ctx.moveTo(fx, fm); ctx.lineTo(ctx.W, fm); ctx.stroke();
+
+  drawCandles(ctx, data, sc, cw);
+
+  ctx.fillStyle = '#f7525f'; ctx.font = '8px monospace';
+  ctx.fillText('FVG', fx + 3, ft - 2);
+})();
+
+// ── IFVG ─────────────────────────────────────────────────────────────────────
+(function() {
+  const ctx = init('c-ifvg', 110);
+  const data = [
+    {o:108,h:109,l:107.5,c:108.5},
+    {o:108.5,h:109.5,l:108,c:109},
+    {o:109,h:109.6,l:104.2,c:104.8},  // C0 bear
+    {o:104.8,h:105,l:100.8,c:101.2},  // C1 impulse down
+    {o:101.2,h:104.8,l:101,c:104.5},  // C2 — IFVG: 104.2..104.8 (fully pierced FVG now inverted)
+    {o:104.5,h:105.2,l:104.1,c:104.8},
+    {o:104.8,h:105.3,l:104.4,c:105.0},
+    {o:105,h:105.6,l:104.6,c:105.3},
+  ];
+  const sc = mkScale(data);
+  const cw = ctx.W / data.length;
+  bg(ctx);
+
+  // IFVG zone, starts at C1 left edge
+  const c0Idx = 2;
+  const ix = cw * (c0Idx + 1);
+  const it = sc.y(104.8, ctx.H), ib = sc.y(104.2, ctx.H);
+  const zH = Math.max(ib - it, 7);
+
+  ctx.fillStyle = 'rgba(247,82,95,0.15)';
+  ctx.fillRect(ix, it, ctx.W - ix, zH);
+  ctx.strokeStyle = '#f7525f'; ctx.lineWidth = 1; dash(ctx, true);
+  ctx.strokeRect(ix, it, ctx.W - ix, zH);
+  dash(ctx, false);
+
+  drawCandles(ctx, data, sc, cw);
+
+  ctx.fillStyle = '#f7525f'; ctx.font = '8px monospace';
+  ctx.fillText('IFVG', ix + 3, it - 2);
+})();
+
+// ── BOS / cBOS ───────────────────────────────────────────────────────────────
+(function() {
+  const ctx = init('c-bos', 110);
+  const data = [
+    {o:100,h:100.8,l:99.5,c:100.4},
+    {o:100.4,h:104,l:100,c:103.5},    // swing high H1 = 104
+    {o:103.5,h:104,l:101.5,c:102},
+    {o:102,h:102.8,l:101,c:101.5},    // swing low L1
+    {o:101.5,h:102.5,l:101,c:102},
+    {o:102,h:105,l:101.8,c:104.8},    // BOS 2px: close 104.8 > H1 (104)
+    {o:104.8,h:106,l:104.5,c:105.5},
+    {o:105.5,h:106,l:105,c:105.5},    // swing high H2 = 106
+    {o:105.5,h:106,l:103.8,c:104.2},  // pullback — swing low L2 (lower than L1)
+    {o:104.2,h:106.2,l:104,c:106.1},  // cBOS 1px: close 106.1 > H2 (106), but L2<L1
+  ];
+  const sc = mkScale(data);
+  const cw = ctx.W / data.length;
+  bg(ctx);
+
+  // BOS line (2px): from H1 level to break candle body
+  {
+    const ly = sc.y(104, ctx.H);
+    const x1 = cw*1+cw/2, x2 = cw*5+cw/2;
+    const bodyTop = sc.y(Math.max(data[5].o, data[5].c), ctx.H);
+    ctx.strokeStyle = '#000'; ctx.lineWidth = 2; dash(ctx, false);
+    ctx.beginPath(); ctx.moveTo(x1, ly); ctx.lineTo(x2, ly); ctx.stroke();
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(x2, ly); ctx.lineTo(x2, bodyTop); ctx.stroke();
+    ctx.fillStyle = '#000'; ctx.font = 'bold 8px monospace';
+    ctx.fillText('BOS 2px', x1 + 3, ly + 9);
+  }
+
+  // cBOS line (1px): from H2 level
+  {
+    const ly = sc.y(106, ctx.H);
+    const x1 = cw*7+cw/2, x2 = cw*9+cw/2;
+    const bodyTop = sc.y(Math.max(data[9].o, data[9].c), ctx.H);
+    ctx.strokeStyle = '#000'; ctx.lineWidth = 1; dash(ctx, false);
+    ctx.beginPath(); ctx.moveTo(x1, ly); ctx.lineTo(x2, ly); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x2, ly); ctx.lineTo(x2, bodyTop); ctx.stroke();
+    ctx.fillStyle = '#000'; ctx.font = '8px monospace';
+    ctx.fillText('cBOS 1px', x1 + 3, ly - 3);
+  }
+
+  drawCandles(ctx, data, sc, cw);
+})();
+
+// ── LIQUIDITY UNSWEPT ────────────────────────────────────────────────────────
+(function() {
+  const ctx = init('c-liq-u', 110);
+  const data = [
+    {o:100,h:100.8,l:99.5,c:100.3},
+    {o:100.3,h:105,l:100,c:104.2},    // swing high (BSL at 105)
+    {o:104.2,h:104.8,l:102.5,c:103},
+    {o:103,h:103.8,l:102,c:102.5},
+    {o:102.5,h:103.3,l:102,c:102.8},
+    {o:102.8,h:103.5,l:102.3,c:103},
+    {o:103,h:103.8,l:102.6,c:103.4},
+    {o:103.4,h:104,l:103,c:103.7},
+  ];
+  data[4].h = 105.0; // EQH
+  const sc = mkScale(data);
+  const cw = ctx.W / data.length;
+  bg(ctx);
+
+  // EQH dashed line from bar 1 to edge
+  const ly = sc.y(105, ctx.H);
+  const x1 = cw*1+cw/2;
+  ctx.strokeStyle = '#000'; ctx.lineWidth = 1; dash(ctx, true);
+  ctx.beginPath(); ctx.moveTo(x1, ly); ctx.lineTo(ctx.W, ly); ctx.stroke();
+  dash(ctx, false);
+
+  // Debug swing markers (triangles, shown here as example of debug mode)
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  ctx.font = '9px monospace';
+  ctx.fillText('▲', cw*1+cw/2-4, sc.y(105, ctx.H)-2); // debug triangle
+
+  drawCandles(ctx, data, sc, cw);
+
+  ctx.fillStyle = '#333'; ctx.font = '8px monospace';
+  ctx.fillText('EQH / BSL', x1 + 4, ly - 4);
+})();
+
+// ── LIQUIDITY SWEPT ──────────────────────────────────────────────────────────
+(function() {
+  const ctx = init('c-liq-s', 110);
+  const data = [
+    {o:100,h:100.8,l:99.5,c:100.3},
+    {o:100.3,h:105,l:100,c:104.2},
+    {o:104.2,h:104.8,l:102.5,c:103},
+    {o:103,h:103.8,l:102,c:102.5},
+    {o:102.5,h:106.5,l:101.5,c:101.9}, // sweep: wick to 106.5, close 101.9
+    {o:101.9,h:102.5,l:101.5,c:102.2},
+    {o:102.2,h:103,l:101.8,c:102.8},
+    {o:102.8,h:103.5,l:102.5,c:103.3},
+  ];
+  const sc = mkScale(data);
+  const cw = ctx.W / data.length;
+  bg(ctx);
+
+  const liqLvl = 105;
+  const x1 = cw*1+cw/2, x2 = cw*4+cw/2;
+  const ly = sc.y(liqLvl, ctx.H);
+  const mx = (x1 + x2) / 2;
+
+  ctx.strokeStyle = '#000'; ctx.lineWidth = 1; dash(ctx, false);
+  ctx.beginPath(); ctx.moveTo(x1, ly); ctx.lineTo(x2, ly); ctx.stroke();
+
+  const s = 5;
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(mx-s, ly-s); ctx.lineTo(mx+s, ly+s);
+  ctx.moveTo(mx+s, ly-s); ctx.lineTo(mx-s, ly+s);
+  ctx.stroke();
+
+  drawCandles(ctx, data, sc, cw);
+  ctx.fillStyle = '#333'; ctx.font = '8px monospace';
+  ctx.fillText('BSL  SWEPT', x1+3, ly-3);
+})();
+
+// ── BLOCKS ───────────────────────────────────────────────────────────────────
+(function() {
+  const ctx = init('c-blocks', 110);
+  const data = [
+    {o:100,h:101,l:99.5,c:100.5},
+    {o:100.5,h:102,l:100,c:101.5},
+    {o:101.5,h:103,l:101,c:102.5},
+    {o:102.5,h:103.8,l:102,c:102.1}, // OB active (idx 3)
+    {o:102.1,h:108.5,l:101.8,c:108}, // impulse up
+    {o:108,h:109,l:107.5,c:108.5},
+    {o:108.5,h:109,l:107.3,c:107.5}, // mitigation: low dips to 107.3, below OB midpoint ~102.9 → no
+    {o:107.5,h:108,l:107,c:107.8},
+  ];
+  // Mitigated OB: separate higher zone
+  const data2 = [
+    {o:105,h:106,l:104.5,c:105.3},   // older OB (idx 0) — mitigated
+    {o:105.3,h:110,l:105,c:109.5},
+    {o:109.5,h:110.5,l:108,c:108.5}, // mitigation touches OB
+    {o:108.5,h:109.5,l:108,c:109},
+  ];
+
+  const allData = [...data2, ...data];
+  const sc = mkScale(allData);
+  const cw = ctx.W / allData.length;
+  bg(ctx);
+
+  // Mitigated block (5%) — idx 0 in allData
+  const mt = sc.y(106, ctx.H), mb = sc.y(104.5, ctx.H);
+  ctx.fillStyle = 'rgba(74,74,74,0.05)';
+  ctx.fillRect(cw*0, mt, cw*4, mb - mt); // fixed width (mitigated, doesn't extend)
+  ctx.fillStyle = '#333'; ctx.font = '8px monospace';
+  ctx.fillText('OB mitigated (5%)', cw*0+2, mt-2);
+
+  // Active block (15%) — idx 7 in allData (= data[3])
+  const at = sc.y(103.8, ctx.H), ab = sc.y(102.0, ctx.H);
+  const ax = cw * (4 + 3); // idx 7 in allData
+  ctx.fillStyle = 'rgba(74,74,74,0.15)';
+  ctx.fillRect(ax, at, ctx.W - ax, ab - at);
+  ctx.fillStyle = '#555'; ctx.font = '8px monospace';
+  ctx.fillText('OB active (15%)', ax+2, at-2);
+
+  drawCandles(ctx, allData, sc, cw);
+})();
+
+// ── VOLUME PROFILE ────────────────────────────────────────────────────────────
+(function() {
+  const ctx = init('c-vp', 110);
+  const W = ctx.W, H = ctx.H;
+  const data = [
+    {o:100,h:101.5,l:99.5,c:101},
+    {o:101,h:103,l:100.5,c:102.5},
+    {o:102.5,h:106,l:102,c:105.5},
+    {o:105.5,h:108,l:105,c:107.5},
+    {o:107.5,h:109,l:107,c:108.5},
+    {o:108.5,h:109.5,l:106.5,c:107},
+    {o:107,h:108,l:106,c:106.5},
+    {o:106.5,h:107.5,l:106,c:107},
+    {o:107,h:108.5,l:106.8,c:108},
+    {o:108,h:109,l:107.5,c:108.7},
+  ];
+  const sc = mkScale(data, 0.05);
+  const VPW = W * 0.15; // VP panel = 15% right
+  const chartW = W - VPW;
+  const cw = chartW / data.length;
+  bg(ctx);
+
+  // VP data (synthetic profile)
+  const poc = 107.0;
+  const vah = 108.5, val = 105.5;
+  const levels = [
+    {p:100.0,v:0.04},{p:100.5,v:0.05},{p:101.0,v:0.08},{p:101.5,v:0.10},
+    {p:102.0,v:0.12},{p:102.5,v:0.13},{p:103.0,v:0.11},{p:103.5,v:0.09},
+    {p:104.0,v:0.08},{p:104.5,v:0.09},{p:105.0,v:0.14},{p:105.5,v:0.20},
+    {p:106.0,v:0.28},{p:106.5,v:0.35},{p:107.0,v:0.50},{p:107.5,v:0.40}, // POC
+    {p:108.0,v:0.30},{p:108.5,v:0.22},{p:109.0,v:0.12},{p:109.5,v:0.06},
+  ];
+  const maxV = Math.max(...levels.map(l => l.v));
+
+  // VAH / VAL dashed lines across chart area
+  const pahY = sc.y(vah, H), palY = sc.y(val, H), pocY = sc.y(poc, H);
+  ctx.strokeStyle = 'rgba(128,128,128,0.5)'; ctx.lineWidth = 1; dash(ctx, true);
+  ctx.beginPath(); ctx.moveTo(0, pahY); ctx.lineTo(chartW, pahY); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(0, palY); ctx.lineTo(chartW, palY); ctx.stroke();
+  dash(ctx, false);
+
+  // POC line across chart
+  ctx.strokeStyle = 'rgba(247,82,95,0.5)'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(0, pocY); ctx.lineTo(chartW, pocY); ctx.stroke();
+
+  // Draw VP bars on right side
+  levels.forEach(lv => {
+    const y = sc.y(lv.p, H);
+    const barW = (lv.v / maxV) * VPW * 0.9;
+    const barH = Math.max(H / levels.length * 0.7, 2);
+    const isPOC = Math.abs(lv.p - poc) < 0.3;
+    const inVA = lv.p >= val && lv.p <= vah;
+    ctx.fillStyle = isPOC
+      ? 'rgba(247,82,95,0.7)'
+      : inVA ? 'rgba(74,74,74,0.55)' : 'rgba(74,74,74,0.25)';
+    ctx.fillRect(chartW, y - barH/2, barW, barH);
+  });
+
+  // Labels on VP
+  ctx.fillStyle = 'rgba(100,100,100,0.8)'; ctx.font = '7px monospace';
+  ctx.fillText('VAH', chartW + 2, pahY - 2);
+  ctx.fillText('VAL', chartW + 2, palY + 8);
+  ctx.fillStyle = 'rgba(247,82,95,0.8)';
+  ctx.fillText('POC', chartW + 2, pocY - 2);
+
+  drawCandles(ctx, data, sc, cw);
+})();
+
+// ── COMBINED FULL CHART ───────────────────────────────────────────────────────
+(function() {
+  const ctx = init('c-full', 300);
+  const W = ctx.W, H = ctx.H;
+  const VPW = W * 0.13;
+  const chartW = W - VPW;
+
+  const data = [
+    {o:100,h:101.5,l:99,c:101},
+    {o:101,h:102.5,l:100.5,c:102},
+    {o:102,h:104,l:101.5,c:103.5},
+    {o:103.5,h:106.5,l:103,c:106},
+    {o:106,h:109.2,l:105.5,c:108.5},  // 4: swing high BSL @ 109.2
+    {o:108.5,h:109.4,l:107,c:107.5},
+    {o:107.5,h:108,l:106,c:106.5},
+    {o:106.5,h:107,l:105,c:105.5},    // 7: swing low (HL)
+    {o:105.5,h:106.1,l:105,c:105.6},  // 8: C0 of FVG
+    {o:105.6,h:113.2,l:105.3,c:112.5},// 9: C1 impulse
+    {o:112.5,h:113.5,l:108.7,c:109.2},// 10: C2 → FVG 106.1..108.7
+    {o:109.2,h:110.5,l:109,c:110},
+    {o:110,h:114.5,l:109.5,c:114},    // 12: BOS 2px — close 114 > swing 109.2
+    {o:114,h:115.5,l:113.5,c:115},
+    {o:115,h:116.5,l:114.5,c:114.5},  // 14: OB candle (bearish)
+    {o:114.5,h:120.5,l:114.2,c:120},  // 15: impulse up
+    {o:120,h:121.5,l:119.5,c:121},
+    {o:121,h:122,l:120.5,c:121.5},
+    {o:121.5,h:122.5,l:121,c:122},
+    {o:122,h:123,l:121.5,c:122.5},
+  ];
+  const sc = mkScale(data, 0.06);
+  const cw = chartW / data.length;
+  const cx = i => i * cw + cw / 2;
+
+  bg(ctx);
+  // Grey right panel for VP
+  ctx.fillStyle = 'rgba(0,0,0,0.03)';
+  ctx.fillRect(chartW, 0, VPW, H);
+
+  // ── BSL dashed (bar4 to BOS at bar12)
+  {
+    const ly = sc.y(109.2, H);
+    ctx.strokeStyle = '#000'; ctx.lineWidth = 1; dash(ctx, true);
+    ctx.beginPath(); ctx.moveTo(cx(4), ly); ctx.lineTo(cx(12), ly); ctx.stroke();
+    dash(ctx, false);
+    ctx.fillStyle = '#333'; ctx.font = '8px monospace';
+    ctx.fillText('BSL', cx(4)+3, ly-3);
+  }
+
+  // ── FVG (C0=idx8, C1=idx9, C2=idx10) — starts at right edge of C0
+  {
+    const fx = cw * 9;  // left edge of C1 = right edge of C0
+    const ft = sc.y(108.7, H), fb = sc.y(106.1, H), fm = (ft+fb)/2;
+    ctx.fillStyle = 'rgba(247,82,95,0.15)';
+    ctx.fillRect(fx, ft, chartW - fx, fb - ft);
+    ctx.strokeStyle = '#f7525f'; ctx.lineWidth = 1; dash(ctx, false);
+    ctx.beginPath(); ctx.moveTo(fx, fm); ctx.lineTo(chartW, fm); ctx.stroke();
+    ctx.fillStyle = '#f7525f'; ctx.font = '8px monospace';
+    ctx.fillText('FVG', fx+3, ft-2);
+  }
+
+  // ── BOS 2px (swing 109.2 → break at bar12)
+  {
+    const ly = sc.y(109.2, H);
+    const x1 = cx(4), x2 = cx(12);
+    const bodyTop = sc.y(Math.max(data[12].o, data[12].c), H);
+    ctx.strokeStyle = '#000'; ctx.lineWidth = 2; dash(ctx, false);
+    ctx.beginPath(); ctx.moveTo(x1, ly); ctx.lineTo(x2, ly); ctx.stroke();
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(x2, ly); ctx.lineTo(x2, bodyTop); ctx.stroke();
+    ctx.fillStyle = '#000'; ctx.font = 'bold 8px monospace';
+    ctx.fillText('BOS', x1+3, ly+9);
+  }
+
+  // ── OB active (bar14)
+  {
+    const ot = sc.y(116.5, H), ob = sc.y(114.5, H);
+    const ox = cx(14) - cw * 0.48;
+    ctx.fillStyle = 'rgba(74,74,74,0.15)';
+    ctx.fillRect(ox, ot, chartW - ox, ob - ot);
+    ctx.fillStyle = '#555'; ctx.font = '8px monospace';
+    ctx.fillText('OB', ox+3, ot-2);
+  }
+
+  // ── VP bars on right side
+  {
+    const poc = 112, vah = 115, val = 107;
+    const levels = [];
+    for (let p = 99; p <= 124; p += 0.5) {
+      // synthetic gaussian-ish profile peaking near poc
+      const d = Math.abs(p - poc);
+      const v = Math.exp(-d*d/20) * 0.9 + (p >= val && p <= vah ? 0.1 : 0);
+      levels.push({p, v});
+    }
+    const maxV = Math.max(...levels.map(l => l.v));
+    const barHunit = H / levels.length;
+
+    levels.forEach(lv => {
+      const y = sc.y(lv.p, H);
+      const bw = (lv.v / maxV) * VPW * 0.85;
+      const bh = Math.max(barHunit * 0.8, 1.5);
+      const isPOC = Math.abs(lv.p - poc) < 0.3;
+      const inVA = lv.p >= val && lv.p <= vah;
+      ctx.fillStyle = isPOC
+        ? 'rgba(247,82,95,0.65)'
+        : inVA ? 'rgba(74,74,74,0.5)' : 'rgba(74,74,74,0.2)';
+      ctx.fillRect(chartW, y - bh/2, bw, bh);
+    });
+
+    // VAH/VAL/POC horizontal lines
+    const pahY = sc.y(vah, H), palY = sc.y(val, H), pocY = sc.y(poc, H);
+    ctx.strokeStyle = 'rgba(120,120,120,0.4)'; ctx.lineWidth = 1; dash(ctx, true);
+    ctx.beginPath(); ctx.moveTo(0, pahY); ctx.lineTo(chartW, pahY); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, palY); ctx.lineTo(chartW, palY); ctx.stroke();
+    dash(ctx, false);
+    ctx.strokeStyle = 'rgba(247,82,95,0.4)';
+    ctx.beginPath(); ctx.moveTo(0, pocY); ctx.lineTo(chartW, pocY); ctx.stroke();
+
+    ctx.fillStyle = 'rgba(247,82,95,0.6)'; ctx.font = '7px monospace';
+    ctx.fillText('POC', chartW+2, pocY-1);
+    ctx.fillStyle = 'rgba(120,120,120,0.6)';
+    ctx.fillText('VAH', chartW+2, pahY-1);
+    ctx.fillText('VAL', chartW+2, palY+7);
+  }
+
+  drawCandles(ctx, data, sc, cw);
+})();
+</script>
+</body>
+</html>

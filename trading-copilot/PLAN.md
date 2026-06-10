@@ -7,15 +7,203 @@ The user is a discretionary SMC/ICT trader with a complete, structured Obsidian 
 **Why this shape.** The KB already encodes the "what to think" (concepts, setups, entry models, global rules). What the LLM cannot do alone is reliably measure things on a chart — fractal sweeps, FVG fill depth, OB mitigation state, multi-TF confluence. Detectors close that gap by returning **compact, self-describing JSON** the LLM can reason over without hallucinating candle positions.
 
 **Decisions locked from the kickoff:**
-- LLM backend: Anthropic SDK only (Sonnet 4.6 default, Opus 4.7 for heavy multi-TF reasoning). Native tool-use loop.
+- LLM backend: Anthropic SDK primary (Sonnet 4.6 default). Multi-LLM abstraction deferred — low priority while Claude performs well.
 - Instruments v1: **crypto only (BTC, ETH)** via Binance public REST. Data layer kept pluggable so XAU/USD, EUR/USD, GER40/EU50, NAS100/SP500 can be added later.
 - Interface: **interactive REPL/chat** in the terminal. Multi-turn conversation, session persistence.
 
-**Hard constraints** (from [_Global_Rules.md](knowledge_base/00_Index/_Global_Rules.md)):
+**Hard constraints:**
 - No order placement. Analysis only.
 - Detectors pure-functional, unit-testable against fixture OHLC (no live API dependency in tests).
 - Multi-TF is non-negotiable: D1 → H4 → H1 → M15 → M3/M1 is how the user thinks, and the system must mirror it.
 - Session-awareness: OTT window 09:00–17:00 Kyiv, killzones at 09:00 / 15:00 / 17:00 Kyiv; NY AM/PM windows for indices (later).
+
+---
+
+## Course Correction — May 2026
+
+After building Phases 1–8, manual testing revealed fundamental issues with several core detectors. This section documents the lessons learned and the corrected approach going forward.
+
+### Root causes
+
+**1 — KB as sole algorithmic source of truth.** The knowledge base contains conceptual explanations written through the lens of personal understanding. It is excellent for *what concepts mean* and *how to interpret signals*, but it does not provide rigorous, testable algorithms. Deriving detector logic directly from KB prose produced subjective, hard-to-debug implementations.
+
+**2 — No reference implementation.** Detectors were written in isolation without verifying against established SMC/ICT implementations. Bugs accumulated silently until manual chart comparison exposed them months later.
+
+**3 — Tests verified code structure, not behavior.** Tests were written to match the implementation rather than assert known-correct outputs on explicitly constructed fixtures. When the implementation was wrong, the tests passed anyway.
+
+### Detector audit results (May 2026)
+
+| Detector | Manual Test | Action |
+|---|---|---|
+| `detect_fvg` | ✅ Correct | Enhanced — `join_consecutive=True` added (merges multi-candle impulse gaps per smc.py) |
+| `detect_ifvg` | ✅ Correct | Keep |
+| `detect_volume_profile` | ✅ Correct | Keep |
+| `current_killzone` | ✅ Correct | Keep |
+| `detect_fractals` | ✅ Correct | Keep |
+| `detect_order_block` | ✅ Rewritten | Swing-break algorithm per smc.py §ob — trigger on swing high/low break, OB = lowest-low (bullish) / highest-high (bearish) in window |
+| `detect_rejection_block` | ✅ Correct | Keep |
+| `detect_mitigation_block` | ✅ Correct | Keep |
+| `detect_breaker_block` | ✅ Correct | Keep |
+| `detect_market_structure` | ✅ Fixed | `_add_boundary_swings()` added — mirrors smc.py boundary logic; in-progress edge leg now included in 4-swing window |
+| `detect_liquidity` | ⚠️ Partial | Rewrite — `is_swept` logic incorrect (trades-above ≠ sweep) |
+| `detect_cumulative_delta` | ⚠️ Partial | Fix — divergence and sweep detection thresholds flawed |
+| `detect_compression` | ❓ Uncertain | Rewrite — volatility squeeze ≠ trending LRLR concept |
+| `detect_bos` | ✅ Fixed | 4-swing window algorithm per smc.py §bos_choch; returns `events` list (newest-first), not a single event |
+| `detect_sponsored_candle` | ❌ Wrong | Rewrite — looks for OB+prior_sweep; should be sweep_candle=OB |
+
+> ⚠️ **SUPERSEDED by the June 2026 audit** (see [Course Correction #2](#course-correction-2--june-2026) below).
+> Empirical probes showed several "✅ Fixed/Rewritten" entries above are still broken:
+> `detect_market_structure` (wick-driven state flips), `detect_bos` (misses textbook breaks),
+> `detect_order_block` (swing dedup deletes the trigger swing). The June table is authoritative.
+
+### Module status
+
+| Module | Status | Notes |
+|---|---|---|
+| `data/` | ❌ Fix (June 2026) | Forming (incomplete) Binance candle kept in every DataFrame — all live signals repaint. Drop last bar when `close_time > now` |
+| `kb/` | ✅ Keep | Works correctly |
+| `mcp_server.py` + registry | ⚠️ Trim | Architecture sound; quarantine broken orderflow tools from tool list (see June audit) |
+| `cli.py`, `session.py` | ✅ Keep | Works correctly |
+| `llm/agent.py`, `tools.py` | ⚠️ Fix (June 2026) | Tool results keyed by name only — multi-TF results overwrite each other, corrupting state diff; duplicate assistant message appended per turn |
+| `llm/prompts.py` | ❌ Update | P1 workflow revision still pending; orderflow rules currently instruct Claude to upgrade confidence on signals the June probes showed are noise |
+| `llm/state.py` | ⚠️ Update | Field names change with detector rewrites; update in sync |
+| `journal/` | ✅ Keep | Unit-tested; validate with real trade data |
+| `stats/` | ⚠️ Caveat | `tools_confirmed` in backtest records lists every evaluated detector (constant per rule) → tool-effectiveness Δwinrate ranking is meaningless on backtest data |
+| `backtest/` | ❌ Fix (June 2026) | Look-ahead leaks (LTF entry before signal close; forming HTF bar in HTF conditions); one-sided fee model; HTF cache ignores kwargs. All existing backtest numbers invalid |
+| `detectors/pine_script.py` | ✅ Done | Mechanical plumbing OK; chart quality bounded by detector correctness |
+| `scripts/debug_detectors.py` | ✅ Done | All per-detector Pine Script generators migrated to B&W design system |
+
+---
+
+## Course Correction #2 — June 2026
+
+Full reports: [REVIEW_2026-06-10.md](REVIEW_2026-06-10.md) (system-wide) and [DETECTOR_REVIEW_2026-06-10.md](DETECTOR_REVIEW_2026-06-10.md) (all 23 tools, 19 empirical probes). Probe scripts committed at [probes/](probes/) — rerun with `python probes/probe_detectors.py`.
+
+### Headline findings
+
+1. **Live analysis runs on the forming candle.** `normalize_binance()` keeps Binance's incomplete last kline; no code drops it. Every detector treats a repaintable bar as closed — violates the "entry only on candle CLOSE" rule system-wide.
+2. **The backtest engine leaks future data.** LTF entries can fill at prices from before the signal bar closed (`_find_ltf_idx` seeds at signal-bar *open*); HTF conditions evaluate the forming HTF bar (`index <= current_bar_ts` on open-time-indexed bars). Plus one-sided fees (docs say per-side), no slippage, no funding. **All existing backtest numbers are invalid.**
+3. **Detector probe score: 6 sound, 7 degraded, 10 broken** — and the broken set is what the prompt weights most heavily (structure, OB, CD, absorption).
+4. **The May P0 rewrites were never completed**, and the test suite that shows 281 green includes exactly the vacuous schema tests the Working Rules forbid (`assert total >= 0`), which is why the broken detectors pass.
+5. **`smartmoneyconcepts` is declared "algorithmic ground truth" but is not in pyproject.toml** — every detector is a hand-rolled reimplementation. This is the root cause of both audit cycles.
+
+### June detector audit (authoritative — supersedes May table)
+
+| Detector | Verdict | Probe evidence |
+|---|---|---|
+| `detect_fvg`, `detect_ifvg`, `detect_volume_profile`, `check_poc_location`, `check_price_in_lvn` | ✅ Works | Exact bounds / correct POC on known fixtures |
+| `detect_fib_zones` | ⚠️ Long-only | No direction param → short OTE invisible (`in_ote=false` at textbook short OTE) |
+| `detect_fractals` | ⚠️ Semantics | `is_swept` = any trade past level; conflates break with sweep |
+| `check_multi_tf_alignment` | ⚠️ Incoherent | Two disjoint code paths; LTF ranging → mixed verdicts; counter-trend labeled `aligned=true` |
+| `current_killzone` | ⚠️ Weekend bug | Saturday 09:30 → active "London Open" killzone |
+| `detect_rejection_block` | ⚠️ Doc mismatch | Fires without the body-engulf the docstring requires; not ICT's wick-based rejection block |
+| `detect_mitigation_block`, `detect_sponsored_candle` | ⚠️ Wrong anchor | "Sweep" tested vs the OB's own high/low, not a liquidity pool; old 2-candle OB predicate |
+| `detect_market_structure` | ❌ Unreliable | HH/HL uptrend in pullback → `ranging`; 0.4% wick dip → `bearish`. Wick-driven right-edge state |
+| `detect_bos` | ❌ Misses breaks | Textbook BOS (close above prior swing high) not emitted; noise cBOS returned instead |
+| `detect_order_block` | ❌ Misses the OB | Swing dedup deletes the broken swing when price rallies before a pullback confirms → no OB; stale noise zone returned |
+| `detect_liquidity` | ❌ False sweeps | Any wide bar crossing a swing high → "sellside sweep, closed_back=true" of that high. (Genuine wick sweeps do register) |
+| `detect_compression` | ❌ Noise | Compressions on 50/50 random-walk charts; LRLR = Low Resistance Liquidity Run, not "lower range lower range" |
+| `detect_cumulative_delta` | ❌ Both signals broken | Breakouts labeled sweeps (no close-back check, wick threshold 0.2% of range); divergence only fires if the current bar is the extreme |
+| `check_cd_absorption` | ❌ Wrong threshold | Volume 25% *below* average passes as "high volume" (`≥0.7×avg`); bullish-only; no CD despite name |
+| `check_absorption_at_poi`, `check_cd_divergence_at_structure`, `check_ob_in_hvn` | ❌ Inherit parents | Composites of the broken detectors above |
+| `detect_breaker_block` | ❌ Misses class | Demands an FVG as pierce evidence; plain close-through never flips to breaker |
+
+### Root causes (R1–R5)
+
+- **R1 — Swing dedup deletes broken swings.** `_deduplicate_swings` merges consecutive same-type swings *before* break scanning, erasing the swing whose break defines the OB/BOS. smc.py consumes swings chronologically instead. Affects order_block, bos, market_structure and all downstream composites.
+- **R2 — Right-edge synthetic swing makes state wick-driven.** `_add_boundary_swings` plants the last bar's high/low as a swing; "bullish" then requires the current bar to exceed the prior swing → every pullback reads `ranging`, wick dips flip to `bearish` with no close confirmation.
+- **R3 — Two competing OB definitions.** order_block uses swing-break; breaker/mitigation/sponsored still use the old 2-candle `is_bullish_ob` predicate — two OB universes on one chart.
+- **R4 — Sweeps anchored to the wrong level.** Sweep checks reference the OB's own boundary or any level geometrically, never a liquidity pool with side semantics.
+- **R5 — Last-bar-only comparisons with unvalidated thresholds.** CD divergence/sweep and absorption examine only the final bar against lags/averages (`wick > 0.2% of range`, `vol ≥ 0.7×avg`).
+
+### Additional system bugs (from REVIEW_2026-06-10.md)
+
+- `agent.py`: tool results keyed by name only → multi-TF results overwrite; duplicate assistant message per turn.
+- Backtest `tools_confirmed` = every evaluated detector (constant per rule) → tool ranking degenerate.
+- `simulate._resolve_limit_level` picks `fvgs[0]`/`obs[0]` without direction check.
+- `fetch_ohlcv_with_delta` bypasses cache and injected DataSource.
+- HTF condition cache key ignores kwargs → collisions; HTF fetch ignores backtest start/end range.
+- Inconsistent ATR definitions across modules (high−low rolling mean vs true range); static ATR scalar in historical loops (violates own rule).
+- `llm/prompts.py` lacks the protocol's HTF-POI hard gate, `## HTF POI` section, and conflict hierarchy — and instructs Claude to upgrade confidence on `confirmed_manipulation`/`absorption_detected`, both shown to be noise.
+
+---
+
+## Working Rules
+
+These rules govern all future development. They replace any conflicting earlier conventions.
+
+### Knowledge hierarchy for detector algorithms
+
+```
+1. Verified open-source implementations  ← PRIMARY
+   ├── smartmoneyconcepts (github.com/joshyattridge/smart-money-concepts)
+   │   MIT licensed, battle-tested, widely used in algo trading.
+   │   Algorithmic ground truth for: swing detection, BOS/CHoCH, OB, FVG, liquidity.
+   └── TradingView community Pine Scripts (high-rating, verified scripts)
+       Visual ground truth. Our Pine Script output must match these visually.
+
+2. Academic / quant resources on market microstructure  ← SECONDARY
+   └── For concepts not covered by the above.
+
+3. Knowledge base (knowledge_base/)  ← TERTIARY
+   ├── Use for: ICT-specific terminology, concept interpretation, setup rules.
+   └── Do NOT use as sole source for algorithm logic or numerical thresholds.
+```
+
+### Detector development checklist
+
+Before writing code:
+- [ ] Find algorithm in `smartmoneyconcepts` or a verified Pine Script
+- [ ] Understand it mechanically: exact conditions, thresholds, edge cases — not the concept, the math
+- [ ] Write 3+ test fixtures with explicitly known expected outputs before touching implementation
+
+After writing code:
+- [ ] Run `pytest` — all tests pass
+- [ ] Generate Pine Script via `generate_pine_script`, overlay on TradingView, compare visually
+- [ ] Only then merge
+
+### Test standards
+
+Tests must assert **known behavior on explicitly constructed data**, not just schema shape.
+
+**Required per detector:**
+- Positive case: fixture with pattern at known price/bar — assert the specific value
+- Negative case: fixture without the pattern — assert empty result
+- Edge case: insufficient bars, flat market, boundary condition
+
+**Forbidden:**
+```python
+# WRONG — tests schema, not behavior
+assert "events" in result
+
+# WRONG — asserts on arbitrary real-market DF without known ground truth
+result = detect_bos(real_btc_df)
+assert result["events"][0]["type"] == "BOS"
+
+# RIGHT — explicitly constructed fixture with known expected output
+df = make_explicit_hh_hl_df()   # Low@100→High@110→Low@105→High@115
+result = detect_bos(df, swing_lookback=3)
+assert any(e["type"] == "BOS" and abs(e["broken_level"] - 110) < 1 for e in result["events"])
+```
+
+### Coding rules
+
+- **No static ATR scalars in historical loops.** Always `atr_arr = (...).rolling(14).mean().values`, index per bar: `atr_arr[i]`.
+- **No string timestamps in internal computation.** Use integer `idx` (DataFrame position) throughout. Convert to ISO 8601 string only in the final output dict.
+- **Swing detection must deduplicate.** Any function returning swing highs/lows must ensure strict H-L-H-L alternation via `_deduplicate_swings()`. No two consecutive same-type swings allowed.
+- **Single swing utility.** All detectors using swing points call `_find_raw_swings` + `_deduplicate_swings` from `market_structure.py`. No duplicate implementations in other files.
+- **Fail soft.** Never raise for "nothing found." Return `{"status": "none"}` or empty list with `"count": 0`.
+- **Compact output.** Return 3–10 most recent/relevant objects. LLM context is finite.
+
+Added June 2026 (from Course Correction #2):
+
+- **Never analyze the forming candle.** `normalize_binance` must drop the last kline when its `close_time > now` (`include_forming=False` default).
+- **Use `smartmoneyconcepts` as a real dependency**, not a reference to reimplement. Swings, BOS/CHoCH, OB, FVG, liquidity = thin wrappers converting library output to our JSON contracts. Custom code only for concepts the library lacks (killzones, sponsored candle, multi-TF, composites).
+- **No dedup-then-scan swing pipelines.** Break detection must consume swings chronologically; deduplication must never erase a swing that was structurally broken (R1).
+- **Sweeps reference liquidity pools, with side semantics.** A buyside sweep can only occur at a buyside pool (swing high/EQH/session high), wick must originate beyond the level, close-back required (R4).
+- **Divergence/absorption logic compares confirmed pivots, not the last bar** against fixed lags or averages. Every numeric threshold needs a probe demonstrating it separates signal from noise (R5).
+- **Backtests: no data from after the decision moment.** LTF scans start at signal-bar *close*; HTF slices include only HTF bars whose *close* ≤ current bar close. Fees two-sided; model slippage and funding.
+- **Probes are the regression suite.** Every bug found by `probes/*.py` becomes a failing pytest before the fix, green after. Schema-shape tests (`assert "x" in result`, `assert total >= 0`) are forbidden and existing ones must be replaced.
 
 ---
 
@@ -148,33 +336,45 @@ These are the minimum the LLM needs to reconstruct a market picture. Each gets i
 
 #### `detect_market_structure(df, swing_lookback=5) -> dict`
 Fractal-based swing detection, state machine over HH/HL vs LH/LL.
+Algorithm mirrors `smc.py §swing_highs_lows + bos_choch`. Key addition: `_add_boundary_swings()` plants synthetic opposite-type swings at bar 0 and bar n-1 so the in-progress edge leg is always included in the 4-swing analysis window.
 ```python
 {
   "state": "bullish" | "bearish" | "ranging",
-  "last_swing_high": {"price": 67234.5, "ts": "2026-04-18T14:00:00Z", "strength": "strong"},
-  "last_swing_low":  {"price": 66112.0, "ts": "2026-04-18T09:00:00Z", "strength": "weak"},
-  "bars_in_state": 42
+  "last_swing_high": {"price": 67234.5, "ts": "2026-04-18T14:00:00Z"},
+  "last_swing_low":  {"price": 66112.0, "ts": "2026-04-18T09:00:00Z"},
+  "bars_in_state": 42,
+  "last_bos_type": "BOS" | "cBOS" | null,
+  "current_price": 67500.0,
+  "atr_14": 210.5
 }
 ```
-Strength: "strong" if the swing was followed by a BOS; "weak" otherwise.
 
-#### `detect_bos(df, swing_lookback=5) -> dict`
-Looks for the **most recent** break of a prior swing by candle close.
+#### `detect_bos(df, swing_lookback=5, max_results=5) -> dict`
+Scans every 4-swing window `[A, B, C, D]` for BOS / cBOS, matching `smc.py §bos_choch`.
+Returns a **list** of events newest-first; does NOT return a single event any more.
 ```python
 {
-  "type": "BOS" | "MSS" | "cBOS" | "none",
-  "direction": "bullish" | "bearish",
-  "broken_level": 67234.5,
-  "break_ts": "2026-04-18T15:00:00Z",
-  "displacement": {"candles": 3, "atr_multiple": 2.4}  # strength proxy
+  "events": [
+    {
+      "type": "BOS" | "cBOS",
+      "direction": "bullish" | "bearish",
+      "broken_level": 67234.5,
+      "break_ts": "2026-04-18T15:00:00Z",
+      "break_candle_body_atr": 2.4
+    },
+    ...
+  ],
+  "count": 2,
+  "latest_bias": "bullish" | "bearish" | "none"
 }
 ```
-- `BOS` = break in trend direction (continuation).
-- `MSS` = break against trend (structure shift; user's term).
-- `cBOS` = new HH/LL without structural break.
+- `BOS`  = break in trend direction (HL+HH or LH+LL) — continuation.
+- `cBOS` = structural reversal (LL+HH or HH+LL) — Change of Character per smc.py.
 
-#### `detect_fvg(df, min_width_atr=0.15, max_age_bars=200) -> dict`
+#### `detect_fvg(df, min_width_atr=0.1, max_age_bars=200, join_consecutive=True) -> dict`
 3-candle imbalance scan. Returns **active** (unfilled or partially filled) FVGs only.
+`join_consecutive=True` (default) merges adjacent same-direction FVGs produced by a
+multi-candle impulse into one wider zone — matches `smc.py fvg(join_consecutive=True)`.
 ```python
 {
   "fvgs": [
@@ -184,7 +384,8 @@ Looks for the **most recent** break of a prior swing by candle close.
       "formed_ts": "2026-04-18T12:00:00Z",
       "fill_percentage": 0,
       "fill_state": "untouched" | "IOFED" | "CE_tagged" | "filled",
-      "age_bars": 5
+      "age_bars": 5,
+      "width_atr_fraction": 0.72
     },
     …
   ],
@@ -193,8 +394,11 @@ Looks for the **most recent** break of a prior swing by candle close.
 ```
 IOFED = touched ≥1% depth. CE_tagged = 50% depth. Filled → dropped from list unless inverted (see IFVG).
 
-#### `detect_order_block(df, ms_state, lookback=60) -> dict`
-Last opposing candle before an impulse that broke structure. Requires `ms_state` (result of structure detector) to filter quality.
+#### `detect_order_block(df, lookback=100, max_results=6, swing_lookback=5) -> dict`
+Swing-break algorithm per `smc.py §ob`. OB is the **lowest-low** candle (bullish) or
+**highest-high** candle (bearish) in the window `[swing_idx+1 .. breakout_bar-1]`,
+where the trigger is a close that breaks a confirmed structural swing high or low.
+Mitigation: 50% midpoint (CE). `has_fvg_after` remains the quality marker.
 ```python
 {
   "obs": [
@@ -202,9 +406,10 @@ Last opposing candle before an impulse that broke structure. Requires `ms_state`
       "type": "bullish",
       "high": 66980.0, "low": 66890.0,
       "formed_ts": "2026-04-18T11:00:00Z",
-      "has_fvg_after": true,       # quality marker per KB
+      "has_fvg_after": true,       # FVG immediately after OB candle = higher quality
       "is_mitigated": false,
-      "distance_atr": 0.8          # how close current price is
+      "distance_atr": 0.8,
+      "age_bars": 14
     }
   ],
   "count": 2
@@ -737,19 +942,148 @@ Add data sources in order of ease: **XAU/USD → EUR/USD → GER40 + EU50 → NA
 
 ### Priority summary
 
-| Phase | Feature | Priority | Status |
-|---|---|---|---|
-| 3 | Trade Journal | **HIGH** | ✅ DONE (SQLite WAL) |
-| 4a | Cumulative Delta detector | **HIGH** | ✅ DONE |
-| 4b | Volume Profile HVN/LVN detector | MEDIUM | ✅ DONE |
-| 4c | Footprint Imbalances | DEFERRED | L2 data unavailable |
-| 5 | Backtest engine | MEDIUM | ✅ DONE (+ walk-forward split + 6 engine upgrades) |
-| 6 | Statistics aggregation | MEDIUM | ✅ DONE |
-| — | Cross-cutting improvements (9 items) | MEDIUM | ✅ DONE |
-| 7 | Dashboard TUI | LOW-MEDIUM | ← **NEXT** |
-| 8a | Composite MCP detectors (absorption, CD divergence) | MEDIUM | ✅ DONE |
-| 8b | QoL (scheduled reports, embeddings, archive browser) | LOW | pending |
-| 9 | More instruments (XAU, FX, indices) | LOW | pending |
+#### Completed phases
+
+| Phase | Feature | Status |
+|---|---|---|
+| 1 | Walking skeleton (data, Tier A detectors, KB, LLM, REPL, MCP) | ✅ DONE |
+| 2 | Tier B detectors + Pine Script generator | ✅ DONE |
+| 3 | Trade Journal (SQLite WAL) | ✅ DONE |
+| 4a | Cumulative Delta detector | ✅ DONE |
+| 4b | Volume Profile HVN/LVN detector | ✅ DONE |
+| 4c | Footprint Imbalances | DEFERRED — L2 data unavailable |
+| 5 | Backtest engine (+ walk-forward, HTF conditions, partial TP, fee model) | ✅ DONE |
+| 6 | Statistics aggregation | ✅ DONE |
+| 8a | Composite MCP detectors (absorption_at_poi, cd_divergence_at_structure) | ✅ DONE |
+
+> ⚠️ "DONE" above means *built*, not *validated*. The June 2026 audit invalidated all Phase 5 backtest results (look-ahead leaks) and found Phases 4/8a detectors broken (see Course Correction #2). Phase 8a composites are quarantined per P0-4.
+
+#### Active roadmap — June 2026 (authoritative; supersedes the post-May table)
+
+Sequencing rule: each later phase consumes data produced by the earlier ones; right now that data is contaminated at the source. **No feature work (P3+) until P0–P1 land.** Until P0-1/P0-2 land, treat all current reports and backtests as unvalidated.
+
+| Priority | Item | Fixes | Effort | Status |
+|---|---|---|---|---|
+| **P0-1 — BLOCKER** | Drop forming bar in `normalize_binance` (`include_forming=False`) | Every live signal repaints | XS | pending |
+| **P0-2 — BLOCKER** | Fix backtest look-ahead: LTF scan from signal-bar *close*; HTF slice by HTF bar *close*; HTF cache key += kwargs; HTF fetch respects start/end. Add automated look-ahead regression test | All backtest numbers invalid | S | pending |
+| **P0-3** | Add `smartmoneyconcepts` dependency; rewrap swings / BOS-CHoCH / OB / FVG / liquidity as thin JSON wrappers | R1, R2, R3; replaces broken market_structure, bos, order_block, liquidity internals | M | pending |
+| **P0-4** | Quarantine broken tools from MCP list + prompt until rewritten: `detect_compression`, `check_cd_absorption`, `check_absorption_at_poi`, `check_cd_divergence_at_structure`; strip `sweep_confirmation`/`divergences` from CD output (keep `session_delta`/`delta_trend`) | Prompt currently upgrades confidence on noise | XS | pending |
+| **P0-5** | Rewrite CD divergence swing-to-swing (pivot CD vs pivot CD); sweep anchoring to liquidity pools with side semantics | R4, R5 | M | pending |
+| **P0-6** | Honest cost model: two-sided fees, slippage param, funding approximation; fix `tools_confirmed` (record actual confirmed conditions); fix `_resolve_limit_level` direction check; route delta fetch through cache/DataSource | Backtest expectancy overstated; tool ranking degenerate | S | pending |
+| **P0-7** | Re-baseline: rerun all rules walk-forward with P0-1…P0-6 in place. This is the first trustworthy expectancy number | Evidence loop | S | pending |
+| **P1-1** | Convert `probes/*.py` into pytest regression suite; delete vacuous schema tests (liquidity, CD, compression test files) | Test suite false confidence | S | pending |
+| **P1-2** | Analysis workflow revision (`prompts.py` + `state.py`): HTF-POI hard gate, `## HTF POI` section, conflict hierarchy (MS > sweep > OB/FVG > orderflow), position management; remove noise-signal upgrade instructions | Protocol/prompt drift | S | pending |
+| **P1-3** | Fix `agent.py`: key tool results by `(name, symbol, tf)`; remove duplicate assistant append. Add automated report-vs-trace check (every price in report must appear in a tool result; fail loudly) | State diff corrupt; anti-hallucination promise unenforced | S | pending |
+| **P1-4** | Trade probability assessment (confidence weights) | — | S | pending — only meaningful after P0 |
+| **P2-1** | Small detector fixes: `fib_zones` direction param (short OTE); `current_killzone` weekday gate; `multi_tf` single coherent code path; `fractals.is_swept` → close-back semantics or rename `is_taken`; `rejection_block` doc/logic alignment; unify ATR definition (true range, rolling per-bar) | June ⚠️ tier | S | pending |
+| **P2-2** | Rebuild breaker/mitigation/sponsored on the library OB (single OB universe); sponsored candle per audit: sweep candle = OB, sweep of a *pool* | R3, R4 | M | pending |
+| **P2-3** | QuantStats tearsheet (promote — do instead of growing `stats/`); binomial CI on winrates in `stats` output | Honest reporting | S | pending |
+| **P2-4** | Journal pattern analysis (LLM error detection) | — | M | pending |
+| **P3** | Dashboard TUI (rich terminal) | — | M | blocked by P0–P1 |
+| **P3** | Multi-LLM provider abstraction | — | — | LOW — deferred |
+| **P4** | Screenshot / text trade analysis (multimodal) | — | M | blocked by P1-2 |
+| **P5** | More instruments (XAU, FX, indices) | — | L | blocked by stable crypto workflow |
+| **P5** | QoL (scheduled reports, embeddings KB, archive browser) | — | — | deferred |
+
+Optional (evaluate during P0-2): replace hand-rolled fill/fee/metrics simulation in `engine.py` with vectorbt, keeping `SetupRule` + detectors as the signal layer. Minimum bar if not migrating: P0-2 + P0-6 + the look-ahead regression test.
+
+---
+
+### P1 — Analysis workflow revision
+
+**Scope: `llm/prompts.py` + `llm/state.py`**
+
+Current state: prompts describe *what* to do but don't enforce order or handle conflicting signals. `state.py` field names will change with detector rewrites.
+
+Changes needed:
+
+1. **HTF POI rule (hard-enforced):** Do not proceed to LTF analysis until HTF POI is identified. Add explicit gate in prompt: "If no HTF POI found → output 'No setup — HTF POI not established' and stop."
+2. **Conflict resolution hierarchy:** Explicit priority order when signals disagree: Market Structure > Liquidity sweep > OB/FVG > Orderflow. State what to do when D1 bullish but H4 bearish (HTF always wins unless H4 shows confirmed cBOS).
+3. **Position management rules in prompt:** Rules from KB (re-sweep, RTGS, adding to winners) currently not reflected in output format. Add `## Position Management` section to output template.
+4. **Output format update:** Add `## HTF POI` section before `## Levels`. Expand Confidence field to reflect probability assessment (see P1b below).
+5. **`state.py` sync:** Update field names to match rewritten detectors. Add version field to state JSON for forward compatibility.
+
+### P1b — Trade probability assessment
+
+**Scope: integrated into existing analysis sections, not a new section**
+
+After P0 detectors are correct, LLM evaluates cumulative confidence based on:
+
+| Factor | Bullish weight | Bearish weight |
+|---|---|---|
+| TF sync (D1+H4+H1 aligned) | +++ | +++ |
+| Liquidity sweep confirmed before POI | ++ | ++ |
+| POI quality (SC > OB > FVG > IFVG) | + per tier | + per tier |
+| BOS/cBOS on entry TF | ++ | ++ |
+| In OTT window + killzone | + | + |
+| Distance to FTA/PTA (nearer = better) | + | + |
+| Direction (reversal vs continuation) | base rate −10% | base rate −10% |
+| CD / orderflow confirmation | + | + |
+
+**Output format:** Confidence integrated into existing sections as `HIGH / MEDIUM / LOW` with explicit listed reasons. Not a percentage number. Example:
+
+```
+## Active Setup
+**1h3m long** — LIVE
+**Confidence: HIGH** — D1+H4+H1 aligned bullish, SSL swept, SC-quality POI, in OTT window
+**Confidence: LOW** — H4 desync, no sweep, outside OTT
+```
+
+### P2 — Pine Script visual design system
+
+**Scope: `detectors/pine_script.py` + new `detectors/pine_design.py`**
+
+Current state: all zones drawn as plain boxes with small labels. No visual hierarchy.
+
+Process:
+1. Define design system in `pine_design.py`: color palette per zone type, label sizes, line styles per state (active/mitigated/tested)
+2. Present as HTML preview for approval before implementation
+3. Apply to `pine_script.py` after approval
+
+Design system rules:
+- SC/Sponsored candle: highest visual weight (thick border, bright color)
+- OB: medium weight
+- FVG: light fill, dashed border
+- Mitigated zones: 50% opacity, grey tint
+- Liquidity levels: horizontal dashed lines with label
+- Dark chart theme as default
+
+**Do last — after all detectors produce correct output.**
+
+### P2b — QuantStats tearsheet
+
+**Scope: new REPL command `journal tearsheet`**
+
+Integrates `ranaroussi/quantstats` library. Generates HTML tearsheet from journal records:
+- Equity curve, drawdown chart, rolling Sharpe
+- Monthly returns heatmap
+- Benchmark: BTC/ETH buy-and-hold comparison
+- Saved to `~/.trading-copilot/reports/tearsheet_{ts}.html`, opened in browser
+
+Complements (not replaces) the custom `stats/aggregator.py` — QuantStats handles trading metrics, aggregator handles tool-effectiveness and KB-specific groupings.
+
+### P2c — Journal pattern analysis
+
+**Scope: new REPL command `journal analyze`**
+
+Sends full journal to LLM with analytical system prompt. Tasks:
+- Find conditions where trades systematically lose (time, session, setup, TF desync)
+- Detect execution errors (premature entry, wrong SL placement) via `tools_confirmed` vs result correlation
+- Correlate "number of conditions confirmed" with winrate
+- Propose specific rule adjustments with evidence: not "avoid Monday shorts" but "4 of 6 Monday short losses occurred when H4 showed cBOS on the open — add H4 cBOS filter to short rules"
+
+Output: structured Markdown report saved to `~/.trading-copilot/reports/journal_analysis_{ts}.md`
+
+### P4 — Screenshot / text trade analysis
+
+**Scope: new mode in CLI and/or MCP tool**
+
+Extends the system to analyze external trades:
+
+- **Screenshot:** pass chart image to multimodal LLM → extract structure, POI, entry, SL/TP → evaluate against KB rules
+- **Text description:** parse trade description ("entered BTC long on H1 OB after SSL sweep") → analyze against rules + find errors
+- **Use cases:** reviewing others' trades, retrospective own-trade analysis, learning from examples
+- **Journal integration:** save analyzed trade as `record_type="reviewed"` with `tags=["external"]`
 
 ---
 

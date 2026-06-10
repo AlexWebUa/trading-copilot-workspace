@@ -12,6 +12,13 @@ Usage (from trading-copilot/ directory):
 Each output file can be pasted directly into TradingView:
     Pine Script Editor → New indicator → paste → Save → Add to chart
     (Switch chart to BTCUSDT and the matching timeframe first.)
+
+Visual style: B&W design system (matches pine_script.py).
+  c_fvg_fill     #f7525f 15%  — FVG / IFVG fill
+  c_fvg_line     #f7525f 100% — FVG center line, IFVG border, bearish events
+  c_block_active #4a4a4a 15%  — All blocks (active)
+  c_block_mit    #4a4a4a 5%   — All blocks (mitigated)
+  c_structure    #000000 100% — BOS, liquidity lines, swing markers
 """
 
 from __future__ import annotations
@@ -110,6 +117,17 @@ def _header(symbol: str, tf: str, indicator_name: str, future_bars: int) -> list
         f'indicator("Debug: {indicator_name} | {symbol} {tf}", overlay=true, '
         "max_boxes_count=500, max_lines_count=500, max_labels_count=500)",
         "",
+        "// ── Design system — B&W preset ───────────────────────────────────────────────",
+        "c_fvg_fill     = color.new(#f7525f, 85)   // FVG / IFVG fill (15%)",
+        "c_fvg_line     = color.new(#f7525f,  0)   // FVG center line, IFVG border, bearish",
+        "c_block_active = color.new(#4a4a4a, 85)   // Blocks active (15%)",
+        "c_block_mit    = color.new(#4a4a4a, 95)   // Blocks mitigated (5%)",
+        "c_structure    = color.new(#000000,  0)   // BOS, liquidity, swing markers",
+        "c_vp_hvn       = color.new(#4a4a4a, 40)   // VP HVN bars",
+        "c_vp_lvn       = color.new(#4a4a4a, 80)   // VP LVN bars",
+        "c_vp_poc       = color.new(#f7525f, 35)   // VP POC bar",
+        'show_labels    = input.bool(true, "Show labels")',
+        "",
         "if barstate.islast",
     ]
 
@@ -127,188 +145,376 @@ def _ts_to_age(df: pd.DataFrame, ts_str: str) -> int:
 
 
 def _nothing(msg: str) -> list[str]:
-    return [f'    label.new(bar_index, close, "{msg}", '
-            f'style=label.style_label_left, color=color.gray, textcolor=color.white, size=size.small)']
+    return [
+        f'    label.new(bar_index, close, "{msg}", '
+        f'style=label.style_label_left, color=c_block_active, '
+        f'textcolor=color.white, size=size.small)'
+    ]
 
 
 def _assemble(header: list[str], body: list[str]) -> str:
     return "\n".join(header + body)
 
 
-# ── Per-detector Pine Script body generators ─────────────────────────────────
-# Each function returns a list[str] of indented Pine Script lines (4-space indent).
+# ── Per-detector Pine Script body generators ──────────────────────────────────
+# Each function returns a list[str] of indented Pine Script lines (4-space).
 # They go inside the `if barstate.islast` block produced by _header().
 
+# ── FVG ──────────────────────────────────────────────────────────────────────
+
 def _pine_fvg(result: dict, future_bars: int) -> list[str]:
+    """
+    B&W style: c_fvg_fill box (no border) + solid c_fvg_line center line.
+    fill_state and fill_percentage shown in label (guarded by show_labels).
+    """
     lines = []
     for z in result.get("fvgs", []):
-        age   = max(1, int(z["age_bars"]))
+        age      = max(1, int(z["age_bars"]))
         top, bot = z["upper"], z["lower"]
-        ztype = z["type"]
-        state = z.get("fill_state", "untouched")
-        bg = "color.new(color.teal, 80)" if ztype == "bullish" else "color.new(color.red, 80)"
-        bc = "color.teal"               if ztype == "bullish" else "color.red"
-        arrow = "U" if ztype == "bullish" else "D"
+        mid      = round((top + bot) / 2, 2)
+        ztype    = z["type"]
+        state    = z.get("fill_state", "untouched")
+        pct      = z.get("fill_percentage", 0)
+        arrow    = "↑" if ztype == "bullish" else "↓"
+        # Fill box — no border
         lines.append(
             f'    box.new(bar_index-{age}, {top}, bar_index+{future_bars}, {bot}, '
-            f'bgcolor={bg}, border_color={bc}, '
-            f'text="FVG{arrow} {state}", text_size=size.tiny)'
+            f'bgcolor=c_fvg_fill, border_color=color.new(color.white, 100))'
+        )
+        # Center line — distinguishes FVG from IFVG
+        lines.append(
+            f'    line.new(bar_index-{age}, {mid}, bar_index+{future_bars}, {mid}, '
+            f'color=c_fvg_line, style=line.style_solid, width=1)'
+        )
+        # Debug label: fill state + fill %
+        lines.append(f'    if show_labels')
+        lines.append(
+            f'        label.new(bar_index-{age}+1, {top}, '
+            f'"FVG{arrow} {state} {pct:.0f}%", '
+            f'color=color.new(color.white, 100), textcolor=color.black, '
+            f'style=label.style_none, size=size.tiny)'
         )
     return lines or _nothing("No FVGs detected")
 
 
-def _pine_order_block(result: dict, future_bars: int) -> list[str]:
-    lines = []
-    for z in result.get("obs", []):
-        age      = max(1, int(z["age_bars"]))
-        top, bot = z["high"], z["low"]
-        ztype    = z["type"]
-        mit      = "mit" if z["is_mitigated"] else "active"
-        fvgm     = "+FVG" if z["has_fvg_after"] else ""
-        bg = "color.new(color.blue, 75)"   if ztype == "bullish" else "color.new(color.orange, 75)"
-        bc = "color.blue"                  if ztype == "bullish" else "color.orange"
-        arrow = "U" if ztype == "bullish" else "D"
-        lines.append(
-            f'    box.new(bar_index-{age}, {top}, bar_index+{future_bars}, {bot}, '
-            f'bgcolor={bg}, border_color={bc}, '
-            f'text="OB{arrow}{fvgm} {mit}", text_size=size.tiny)'
-        )
-    return lines or _nothing("No Order Blocks detected")
-
+# ── IFVG ─────────────────────────────────────────────────────────────────────
 
 def _pine_ifvg(result: dict, future_bars: int) -> list[str]:
+    """
+    B&W style: c_fvg_fill box with DASHED c_fvg_line border. NO center line
+    (dashed border is the visual distinction from FVG).
+    """
     lines = []
     for z in result.get("ifvgs", []):
         age      = max(1, int(z["age_bars"]))
         top, bot = z["upper"], z["lower"]
         ztype    = z["type"]
         tested   = "tested" if z["is_tested"] else "untested"
-        bg = "color.new(color.lime, 70)"   if ztype == "bullish" else "color.new(color.maroon, 70)"
-        bc = "color.lime"                  if ztype == "bullish" else "color.maroon"
-        arrow = "U" if ztype == "bullish" else "D"
+        arrow    = "↑" if ztype == "bullish" else "↓"
         lines.append(
             f'    box.new(bar_index-{age}, {top}, bar_index+{future_bars}, {bot}, '
-            f'bgcolor={bg}, border_color={bc}, '
-            f'text="IFVG{arrow} {tested}", text_size=size.tiny)'
+            f'bgcolor=c_fvg_fill, border_color=c_fvg_line, '
+            f'border_style=line.style_dashed, border_width=1)'
+        )
+        lines.append(f'    if show_labels')
+        lines.append(
+            f'        label.new(bar_index-{age}+1, {top}, "IFVG{arrow} {tested}", '
+            f'color=color.new(color.white, 100), textcolor=color.black, '
+            f'style=label.style_none, size=size.tiny)'
         )
     return lines or _nothing("No IFVGs detected")
 
 
+# ── Order Blocks ──────────────────────────────────────────────────────────────
+
+def _pine_order_block(result: dict, future_bars: int) -> list[str]:
+    """
+    Active: c_block_active (extends right).  Mitigated: c_block_mit (ends at bar_index).
+    has_fvg_after shown as +FVG suffix.
+    """
+    lines = []
+    for z in result.get("obs", []):
+        age      = max(1, int(z["age_bars"]))
+        top, bot = z["high"], z["low"]
+        ztype    = z["type"]
+        mit      = z.get("is_mitigated", False)
+        fvgm     = "+FVG" if z.get("has_fvg_after") else ""
+        arrow    = "↑" if ztype == "bullish" else "↓"
+        label    = f"OB{arrow}{fvgm}"
+        if mit:
+            lines.append(
+                f'    box.new(bar_index-{age}, {top}, bar_index, {bot}, '
+                f'bgcolor=c_block_mit, border_color=color.new(color.white, 100))'
+            )
+            lines.append(f'    if show_labels')
+            lines.append(
+                f'        label.new(bar_index-{age}+1, {top}, "{label} mit", '
+                f'color=color.new(color.white, 100), textcolor=color.black, '
+                f'style=label.style_none, size=size.tiny)'
+            )
+        else:
+            lines.append(
+                f'    box.new(bar_index-{age}, {top}, bar_index+{future_bars}, {bot}, '
+                f'bgcolor=c_block_active, border_color=color.new(color.white, 100))'
+            )
+            lines.append(f'    if show_labels')
+            lines.append(
+                f'        label.new(bar_index-{age}+1, {top}, "{label}", '
+                f'color=color.new(color.white, 100), textcolor=color.black, '
+                f'style=label.style_none, size=size.tiny)'
+            )
+    return lines or _nothing("No Order Blocks detected")
+
+
+# ── Breaker Blocks ────────────────────────────────────────────────────────────
+
 def _pine_breaker_block(result: dict, future_bars: int) -> list[str]:
+    """Same block pattern as OB — c_block_active / c_block_mit."""
     lines = []
     for z in result.get("breakers", []):
         age      = max(1, int(z["age_bars"]))
         top, bot = z["high"], z["low"]
         ztype    = z["type"]
-        tested   = "tested" if z["is_tested"] else "untested"
-        bg = "color.new(color.aqua, 70)"    if ztype == "bullish" else "color.new(color.fuchsia, 70)"
-        bc = "color.aqua"                   if ztype == "bullish" else "color.fuchsia"
-        arrow = "U" if ztype == "bullish" else "D"
-        lines.append(
-            f'    box.new(bar_index-{age}, {top}, bar_index+{future_bars}, {bot}, '
-            f'bgcolor={bg}, border_color={bc}, '
-            f'text="BRK{arrow} {tested}", text_size=size.tiny)'
-        )
+        mit      = z.get("is_mitigated", False)
+        tested   = " tested" if z.get("is_tested") else ""
+        arrow    = "↑" if ztype == "bullish" else "↓"
+        label    = f"BB{arrow}{tested}"
+        if mit:
+            lines.append(
+                f'    box.new(bar_index-{age}, {top}, bar_index, {bot}, '
+                f'bgcolor=c_block_mit, border_color=color.new(color.white, 100))'
+            )
+            lines.append(f'    if show_labels')
+            lines.append(
+                f'        label.new(bar_index-{age}+1, {top}, "{label} mit", '
+                f'color=color.new(color.white, 100), textcolor=color.black, '
+                f'style=label.style_none, size=size.tiny)'
+            )
+        else:
+            lines.append(
+                f'    box.new(bar_index-{age}, {top}, bar_index+{future_bars}, {bot}, '
+                f'bgcolor=c_block_active, border_color=color.new(color.white, 100))'
+            )
+            lines.append(f'    if show_labels')
+            lines.append(
+                f'        label.new(bar_index-{age}+1, {top}, "{label}", '
+                f'color=color.new(color.white, 100), textcolor=color.black, '
+                f'style=label.style_none, size=size.tiny)'
+            )
     return lines or _nothing("No Breaker Blocks detected")
 
 
+# ── Rejection Blocks ──────────────────────────────────────────────────────────
+
 def _pine_rejection_block(result: dict, future_bars: int) -> list[str]:
+    """Same block pattern — c_block_active / c_block_mit."""
     lines = []
     for z in result.get("blocks", []):
         age      = max(1, int(z["age_bars"]))
         top, bot = z["high"], z["low"]
         ztype    = z["type"]
-        mit      = "mit" if z["is_mitigated"] else "active"
-        bg = "color.new(color.navy, 70)"   if ztype == "bullish" else "color.new(color.purple, 70)"
-        bc = "color.navy"                  if ztype == "bullish" else "color.purple"
-        arrow = "U" if ztype == "bullish" else "D"
-        lines.append(
-            f'    box.new(bar_index-{age}, {top}, bar_index+{future_bars}, {bot}, '
-            f'bgcolor={bg}, border_color={bc}, '
-            f'text="RejB{arrow} {mit}", text_size=size.tiny)'
-        )
+        mit      = z.get("is_mitigated", False)
+        arrow    = "↑" if ztype == "bullish" else "↓"
+        label    = f"RB{arrow}"
+        if mit:
+            lines.append(
+                f'    box.new(bar_index-{age}, {top}, bar_index, {bot}, '
+                f'bgcolor=c_block_mit, border_color=color.new(color.white, 100))'
+            )
+            lines.append(f'    if show_labels')
+            lines.append(
+                f'        label.new(bar_index-{age}+1, {top}, "{label} mit", '
+                f'color=color.new(color.white, 100), textcolor=color.black, '
+                f'style=label.style_none, size=size.tiny)'
+            )
+        else:
+            lines.append(
+                f'    box.new(bar_index-{age}, {top}, bar_index+{future_bars}, {bot}, '
+                f'bgcolor=c_block_active, border_color=color.new(color.white, 100))'
+            )
+            lines.append(f'    if show_labels')
+            lines.append(
+                f'        label.new(bar_index-{age}+1, {top}, "{label}", '
+                f'color=color.new(color.white, 100), textcolor=color.black, '
+                f'style=label.style_none, size=size.tiny)'
+            )
     return lines or _nothing("No Rejection Blocks detected")
 
 
+# ── Mitigation Blocks ─────────────────────────────────────────────────────────
+
 def _pine_mitigation_block(result: dict, future_bars: int) -> list[str]:
+    """Same block pattern — c_block_active / c_block_mit."""
     lines = []
     for z in result.get("blocks", []):
         age      = max(1, int(z["age_bars"]))
         top, bot = z["high"], z["low"]
         ztype    = z["type"]
-        mit      = "mit" if z["is_mitigated"] else "active"
-        bg = "color.new(color.green, 65)"  if ztype == "bullish" else "color.rgb(139, 0, 0, 65)"
-        bc = "color.green"                 if ztype == "bullish" else "color.rgb(139, 0, 0, 0)"
-        arrow = "U" if ztype == "bullish" else "D"
-        lines.append(
-            f'    box.new(bar_index-{age}, {top}, bar_index+{future_bars}, {bot}, '
-            f'bgcolor={bg}, border_color={bc}, '
-            f'text="MitB{arrow} {mit}", text_size=size.tiny)'
-        )
+        mit      = z.get("is_mitigated", False)
+        arrow    = "↑" if ztype == "bullish" else "↓"
+        label    = f"MB{arrow}"
+        if mit:
+            lines.append(
+                f'    box.new(bar_index-{age}, {top}, bar_index, {bot}, '
+                f'bgcolor=c_block_mit, border_color=color.new(color.white, 100))'
+            )
+            lines.append(f'    if show_labels')
+            lines.append(
+                f'        label.new(bar_index-{age}+1, {top}, "{label} mit", '
+                f'color=color.new(color.white, 100), textcolor=color.black, '
+                f'style=label.style_none, size=size.tiny)'
+            )
+        else:
+            lines.append(
+                f'    box.new(bar_index-{age}, {top}, bar_index+{future_bars}, {bot}, '
+                f'bgcolor=c_block_active, border_color=color.new(color.white, 100))'
+            )
+            lines.append(f'    if show_labels')
+            lines.append(
+                f'        label.new(bar_index-{age}+1, {top}, "{label}", '
+                f'color=color.new(color.white, 100), textcolor=color.black, '
+                f'style=label.style_none, size=size.tiny)'
+            )
     return lines or _nothing("No Mitigation Blocks detected")
 
 
+# ── Liquidity ─────────────────────────────────────────────────────────────────
+
 def _pine_liquidity(result: dict, df: pd.DataFrame, future_bars: int) -> list[str]:
+    """
+    Unswept BSL/SSL: c_structure dashed line.
+    Sweeps: c_structure solid line + ✕ marker at midpoint.
+    Debug extra: touches count shown in label.
+    """
     lines = []
     for pool in result.get("buyside_liquidity", []):
-        age   = max(1, int(pool["age_bars"]))
-        price = pool["price"]
-        ptype = pool["type"]
+        age     = max(1, int(pool["age_bars"]))
+        price   = pool["price"]
         touches = pool.get("touches", 0)
-        lines += [
-            f'    line.new(bar_index-{age}, {price}, bar_index+{future_bars}, {price}, '
-            f'color=color.yellow, style=line.style_dashed, width=2)',
-            f'    label.new(bar_index-{age}, {price}, "BSL {price} ({ptype}) x{touches}", '
-            f'color=color.yellow, textcolor=color.black, style=label.style_label_right, size=size.tiny)',
-        ]
-    for pool in result.get("sellside_liquidity", []):
-        age   = max(1, int(pool["age_bars"]))
-        price = pool["price"]
-        ptype = pool["type"]
-        touches = pool.get("touches", 0)
-        lines += [
-            f'    line.new(bar_index-{age}, {price}, bar_index+{future_bars}, {price}, '
-            f'color=color.purple, style=line.style_dashed, width=2)',
-            f'    label.new(bar_index-{age}, {price}, "SSL {price} ({ptype}) x{touches}", '
-            f'color=color.purple, textcolor=color.white, style=label.style_label_right, size=size.tiny)',
-        ]
-    for sweep in result.get("recent_sweeps", []):
-        age   = _ts_to_age(df, sweep["sweep_ts"])
-        level = sweep["swept_level"]
-        side  = sweep["side"]
-        closed = sweep.get("closed_back", False)
-        color = "color.yellow" if side == "buyside" else "color.purple"
-        style = "label.style_triangleup" if side == "sellside" else "label.style_triangledown"
-        txt   = f"SW {side[:3]} {'cb' if closed else ''}"
         lines.append(
-            f'    label.new(bar_index-{age}, {level}, "{txt}", '
-            f'color={color}, textcolor=color.black, style={style}, size=size.small)'
+            f'    line.new(bar_index-{age}, {price}, bar_index+{future_bars}, {price}, '
+            f'color=c_structure, style=line.style_dashed, width=1)'
+        )
+        lines.append(f'    if show_labels')
+        lines.append(
+            f'        label.new(bar_index-{age}+1, {price}, '
+            f'"BSL {price} x{touches}", '
+            f'color=color.new(color.white, 100), textcolor=color.black, '
+            f'style=label.style_none, size=size.tiny)'
+        )
+    for pool in result.get("sellside_liquidity", []):
+        age     = max(1, int(pool["age_bars"]))
+        price   = pool["price"]
+        touches = pool.get("touches", 0)
+        lines.append(
+            f'    line.new(bar_index-{age}, {price}, bar_index+{future_bars}, {price}, '
+            f'color=c_structure, style=line.style_dashed, width=1)'
+        )
+        lines.append(f'    if show_labels')
+        lines.append(
+            f'        label.new(bar_index-{age}+1, {price}, '
+            f'"SSL {price} x{touches}", '
+            f'color=color.new(color.white, 100), textcolor=color.black, '
+            f'style=label.style_none, size=size.tiny)'
+        )
+    for sweep in result.get("recent_sweeps", []):
+        try:
+            ts = pd.Timestamp(sweep["sweep_ts"])
+            if ts.tzinfo is None:
+                ts = ts.tz_localize("UTC")
+            age_sweep = max(1, _ts_to_age(df, sweep["sweep_ts"]))
+        except Exception:
+            continue
+        age_level = age_sweep + 10      # approximate fractal age
+        mid_age   = (age_level + age_sweep) // 2
+        level     = sweep["swept_level"]
+        side_tag  = "BSL" if sweep["side"] == "buyside" else "SSL"
+        closed    = sweep.get("closed_back", False)
+        # Solid line from fractal to sweep bar
+        lines.append(
+            f'    line.new(bar_index-{age_level}, {level}, bar_index-{age_sweep}, {level}, '
+            f'color=c_structure, style=line.style_solid, width=1)'
+        )
+        # ✕ marker at midpoint
+        lines.append(
+            f'    label.new(bar_index-{mid_age}, {level}, "✕", '
+            f'color=color.new(color.white, 100), textcolor=color.black, '
+            f'style=label.style_none, size=size.small)'
+        )
+        lines.append(f'    if show_labels')
+        lines.append(
+            f'        label.new(bar_index-{age_level}+1, {level}, '
+            f'"{side_tag} swept{"·cb" if closed else ""}", '
+            f'color=color.new(color.white, 100), textcolor=color.black, '
+            f'style=label.style_none, size=size.tiny)'
         )
     return lines or _nothing("No liquidity levels detected")
 
 
-def _pine_bos(result: dict, df: pd.DataFrame, future_bars: int) -> list[str]:
-    bos_type = result.get("type", "none")
-    if bos_type in (None, "none"):
-        return _nothing("No BOS / MSS detected")
-    bos_dir   = result.get("direction", "")
-    level     = result.get("broken_level")
-    break_ts  = result.get("break_ts")
-    if not level:
-        return _nothing(f"BOS type={bos_type} but no level")
-    age   = _ts_to_age(df, break_ts) if break_ts else 2
-    bc    = "color.green" if bos_dir == "bullish" else "color.red"
-    disp  = result.get("displacement_candles", 0)
-    atr_m = result.get("displacement_atr_multiple", 0)
-    return [
-        f'    line.new(bar_index-{age}, {level}, bar_index+{future_bars}, {level}, '
-        f'color={bc}, style=line.style_solid, width=2)',
-        f'    label.new(bar_index, {level}, "{bos_type} {bos_dir} | disp: {disp}b / {atr_m}xATR", '
-        f'color={bc}, textcolor=color.white, style=label.style_label_left, size=size.small)',
-    ]
+# ── BOS / cBOS ────────────────────────────────────────────────────────────────
 
+def _pine_bos(result: dict, df: pd.DataFrame, future_bars: int) -> list[str]:
+    """
+    All BOS / cBOS events from detect_bos["events"].
+    c_structure solid line: 2px=BOS, 1px=cBOS.
+    Bearish events use c_fvg_line for the summary label (red = alert).
+    Debug extra: break_candle_body_atr shown per event.
+    """
+    events = result.get("events", [])
+    if not events:
+        reason = result.get("status", "no events found")
+        return _nothing(f"No BOS / cBOS — {reason}")
+
+    lines = []
+    for i, event in enumerate(events):
+        bos_type  = event.get("type", "BOS")
+        direction = event.get("direction", "")
+        level     = event.get("broken_level")
+        break_ts  = event.get("break_ts")
+        body_atr  = event.get("break_candle_body_atr", 0)
+
+        if level is None:
+            continue
+
+        age   = max(1, _ts_to_age(df, break_ts)) if break_ts else 2
+        width = 2 if bos_type == "BOS" else 1
+        # Left edge: approximate fractal (break bar + 8 back)
+        age_left = age + 8
+        arrow    = "↑" if direction == "bullish" else "↓"
+        rank     = f"#{i+1}"
+
+        # Horizontal level line
+        lines.append(
+            f'    line.new(bar_index-{age_left}, {level}, bar_index-{age}, {level}, '
+            f'color=c_structure, style=line.style_solid, width={width})'
+        )
+        lines.append(f'    if show_labels')
+        lines.append(
+            f'        label.new(bar_index-{age_left}, {level}, '
+            f'"{bos_type}{arrow} {rank} | {body_atr:.2f}xATR", '
+            f'color=color.new(color.white, 100), textcolor=color.black, '
+            f'style=label.style_none, size=size.tiny)'
+        )
+
+    # Summary label
+    latest = result.get("latest_bias", "none")
+    count  = result.get("count", len(events))
+    lc     = "c_fvg_line" if latest == "bearish" else ("c_structure" if latest == "bullish" else "c_block_active")
+    lines.append(
+        f'    label.new(bar_index+1, close, '
+        f'"BOS: {count} events | bias: {latest}", '
+        f'color={lc}, textcolor=color.white, style=label.style_label_left, size=size.small)'
+    )
+    return lines
+
+
+# ── Volume Profile ────────────────────────────────────────────────────────────
 
 def _pine_volume_profile(result: dict, bars: int, future_bars: int) -> list[str]:
+    """
+    B&W style: c_vp_poc for POC (dashed line + bar), c_vp_hvn/lvn for nodes.
+    VAH/VAL as grey (#888) dashed lines.
+    """
     if result.get("status"):
         return _nothing(f"Volume profile: {result['status']}")
     lines = []
@@ -317,82 +523,201 @@ def _pine_volume_profile(result: dict, bars: int, future_bars: int) -> list[str]
     val = result.get("val")
     loc = result.get("current_price_location", "")
     left = bars - 1
+
     if poc:
         lines += [
             f'    line.new(bar_index-{left}, {poc}, bar_index+{future_bars}, {poc}, '
-            f'color=color.yellow, style=line.style_solid, width=2)',
-            f'    label.new(bar_index, {poc}, "POC {poc} | {loc}", '
-            f'color=color.yellow, textcolor=color.black, style=label.style_label_left, size=size.small)',
+            f'color=c_vp_poc, style=line.style_dashed, width=1)',
         ]
-    if vah:
-        lines += [
-            f'    line.new(bar_index-{left}, {vah}, bar_index+{future_bars}, {vah}, '
-            f'color=color.new(color.blue, 30), style=line.style_dotted, width=1)',
-            f'    label.new(bar_index, {vah}, "VAH {vah}", '
-            f'color=color.new(color.blue, 30), textcolor=color.white, style=label.style_label_left, size=size.tiny)',
-        ]
-    if val:
-        lines += [
-            f'    line.new(bar_index-{left}, {val}, bar_index+{future_bars}, {val}, '
-            f'color=color.new(color.blue, 30), style=line.style_dotted, width=1)',
-            f'    label.new(bar_index, {val}, "VAL {val}", '
-            f'color=color.new(color.blue, 30), textcolor=color.white, style=label.style_label_left, size=size.tiny)',
-        ]
+        lines.append(f'    if show_labels')
+        lines.append(
+            f'        label.new(bar_index, {poc}, "POC {poc} | {loc}", '
+            f'color=c_vp_poc, textcolor=color.white, '
+            f'style=label.style_label_left, size=size.small)'
+        )
+    for lvl, lbl in [(vah, "VAH"), (val, "VAL")]:
+        if lvl:
+            lines.append(
+                f'    line.new(bar_index-{left}, {lvl}, bar_index+{future_bars}, {lvl}, '
+                f'color=color.new(#888888, 40), style=line.style_dashed, width=1)'
+            )
+            lines.append(f'    if show_labels')
+            lines.append(
+                f'        label.new(bar_index, {lvl}, "{lbl} {lvl}", '
+                f'color=color.new(#888888, 40), textcolor=color.white, '
+                f'style=label.style_label_left, size=size.tiny)'
+            )
     for node in result.get("hvn_nodes", [])[:15]:
         ph, pl = node["price_high"], node["price_low"]
         vpct   = node["volume_pct"]
+        is_poc = (pl <= poc <= ph) if poc else False
+        col    = "c_vp_poc" if is_poc else "c_vp_hvn"
         lines.append(
             f'    box.new(bar_index-{left}, {ph}, bar_index+{future_bars}, {pl}, '
-            f'bgcolor=color.new(color.green, 88), border_color=color.new(color.green, 55), '
-            f'text="HVN {vpct:.1f}%", text_size=size.tiny)'
+            f'bgcolor={col}, border_color=color.new(color.white, 100))'
+        )
+        lines.append(f'    if show_labels')
+        lines.append(
+            f'        label.new(bar_index+{future_bars}+1, {round((ph+pl)/2, 2)}, '
+            f'"HVN {vpct:.1f}%", '
+            f'color=color.new(color.white, 100), textcolor=color.black, '
+            f'style=label.style_none, size=size.tiny)'
         )
     for node in result.get("lvn_nodes", [])[:15]:
         ph, pl = node["price_high"], node["price_low"]
         vpct   = node["volume_pct"]
         lines.append(
             f'    box.new(bar_index-{left}, {ph}, bar_index+{future_bars}, {pl}, '
-            f'bgcolor=color.new(color.red, 92), border_color=color.new(color.red, 65), '
-            f'text="LVN {vpct:.1f}%", text_size=size.tiny)'
+            f'bgcolor=c_vp_lvn, border_color=color.new(color.white, 100))'
+        )
+        lines.append(f'    if show_labels')
+        lines.append(
+            f'        label.new(bar_index+{future_bars}+1, {round((ph+pl)/2, 2)}, '
+            f'"LVN {vpct:.1f}%", '
+            f'color=color.new(color.white, 100), textcolor=color.black, '
+            f'style=label.style_none, size=size.tiny)'
         )
     return lines or _nothing("Volume profile: no levels")
 
 
+# ── Market Structure ──────────────────────────────────────────────────────────
+
 def _pine_market_structure(result: dict, df: pd.DataFrame, future_bars: int) -> list[str]:
+    """
+    Full swing history: every confirmed swing point + trend transitions.
+
+    B&W style:
+      Swing highs  — c_structure triangle-down markers
+      Swing lows   — c_structure triangle-up markers
+      Bullish transition — c_structure label (black = positive/neutral)
+      Bearish transition — c_fvg_line label  (red = alert)
+      Last SwH/SwL lines — c_structure dotted
+    """
     if result.get("status"):
         return _nothing(f"Market structure: {result['status']}")
-    lines = []
+
+    from copilot.detectors.market_structure import (
+        _find_raw_swings,
+        _deduplicate_swings,
+        _add_boundary_swings,
+    )
+
+    swing_lookback = 5
+    raw_dedup = _deduplicate_swings(_find_raw_swings(df, swing_lookback))
+    swings    = _add_boundary_swings(raw_dedup, df)
+    n         = len(df)
+    lines: list[str] = []
+
+    # ── 1. Confirmed swing markers ────────────────────────────────────────────
+    for s in raw_dedup:
+        age   = max(1, n - 1 - s["idx"])
+        price = round(s["price"], 2)
+        if s["type"] == "high":
+            lines.append(
+                f'    label.new(bar_index-{age}, {price}, "H {price}", '
+                f'color=c_structure, textcolor=color.white, '
+                f'style=label.style_triangledown, size=size.tiny)'
+            )
+        else:
+            lines.append(
+                f'    label.new(bar_index-{age}, {price}, "L {price}", '
+                f'color=c_block_active, textcolor=color.white, '
+                f'style=label.style_triangleup, size=size.tiny)'
+            )
+
+    # ── 2. Trend transition labels ────────────────────────────────────────────
+    prev_state = "ranging"
+    for w in range(len(swings) - 3):
+        A, B, C, D = swings[w], swings[w + 1], swings[w + 2], swings[w + 3]
+        types       = [x["type"] for x in (A, B, C, D)]
+        Ap, Bp, Cp, Dp = A["price"], B["price"], C["price"], D["price"]
+        state    = "ranging"
+        bos_kind = None
+
+        if types == ["low", "high", "low", "high"]:
+            if Cp > Ap and Dp > Bp:
+                state, bos_kind = "bullish", "BOS"
+            elif Cp < Ap and Dp > Bp:
+                state, bos_kind = "bullish", "cBOS"
+        elif types == ["high", "low", "high", "low"]:
+            if Cp < Ap and Dp < Bp:
+                state, bos_kind = "bearish", "BOS"
+            elif Cp > Ap and Dp < Bp:
+                state, bos_kind = "bearish", "cBOS"
+
+        if state != "ranging" and state != prev_state:
+            d_age   = max(1, n - 1 - D["idx"])
+            d_price = round(Dp, 2)
+            # Bullish = c_structure (black), Bearish = c_fvg_line (red)
+            color = "c_structure" if state == "bullish" else "c_fvg_line"
+            style = "label.style_label_up" if state == "bullish" else "label.style_label_down"
+            tag   = f"{bos_kind} {state}"
+            lines.append(
+                f'    label.new(bar_index-{d_age}, {d_price}, "{tag}", '
+                f'color={color}, textcolor=color.white, style={style}, size=size.small)'
+            )
+
+        if state != "ranging":
+            prev_state = state
+
+    # ── 3. Last SwH / SwL dotted extension lines ──────────────────────────────
+    sh = result.get("last_swing_high") or {}
+    sl = result.get("last_swing_low")  or {}
+    if sh.get("price") and sh.get("ts"):
+        sh_age = max(1, _ts_to_age(df, sh["ts"]))
+        sh_p   = sh["price"]
+        lines += [
+            f'    line.new(bar_index-{sh_age}, {sh_p}, bar_index+{future_bars}, {sh_p}, '
+            f'color=c_structure, style=line.style_dotted, width=1)',
+        ]
+        lines.append(f'    if show_labels')
+        lines.append(
+            f'        label.new(bar_index, {sh_p}, "SwH {sh_p}", '
+            f'color=color.new(color.white, 100), textcolor=color.black, '
+            f'style=label.style_none, size=size.tiny)'
+        )
+    if sl.get("price") and sl.get("ts"):
+        sl_age = max(1, _ts_to_age(df, sl["ts"]))
+        sl_p   = sl["price"]
+        lines += [
+            f'    line.new(bar_index-{sl_age}, {sl_p}, bar_index+{future_bars}, {sl_p}, '
+            f'color=c_block_active, style=line.style_dotted, width=1)',
+        ]
+        lines.append(f'    if show_labels')
+        lines.append(
+            f'        label.new(bar_index, {sl_p}, "SwL {sl_p}", '
+            f'color=color.new(color.white, 100), textcolor=color.black, '
+            f'style=label.style_none, size=size.tiny)'
+        )
+
+    # ── 4. Summary label ─────────────────────────────────────────────────────
     state         = result.get("state", "unknown")
     bars_in_state = result.get("bars_in_state", 0)
     current_price = result.get("current_price", 0)
     atr           = result.get("atr_14", 0)
-    sh = result.get("last_swing_high", {})
-    sl = result.get("last_swing_low", {})
-    state_color = "color.green" if state == "bullish" else ("color.red" if state == "bearish" else "color.gray")
-    if sh.get("price") and sh.get("ts"):
-        age = _ts_to_age(df, sh["ts"])
-        lines += [
-            f'    line.new(bar_index-{age}, {sh["price"]}, bar_index+{future_bars}, {sh["price"]}, '
-            f'color=color.red, style=line.style_dotted, width=1)',
-            f'    label.new(bar_index-{age}, {sh["price"]}, "SwH {sh["price"]} ({sh.get("strength","")})", '
-            f'color=color.red, textcolor=color.white, style=label.style_label_right, size=size.tiny)',
-        ]
-    if sl.get("price") and sl.get("ts"):
-        age = _ts_to_age(df, sl["ts"])
-        lines += [
-            f'    line.new(bar_index-{age}, {sl["price"]}, bar_index+{future_bars}, {sl["price"]}, '
-            f'color=color.green, style=line.style_dotted, width=1)',
-            f'    label.new(bar_index-{age}, {sl["price"]}, "SwL {sl["price"]} ({sl.get("strength","")})", '
-            f'color=color.green, textcolor=color.white, style=label.style_label_right, size=size.tiny)',
-        ]
-    lines.append(
-        f'    label.new(bar_index, {current_price}, '
-        f'"MS: {state} | {bars_in_state} bars | ATR: {atr}", '
-        f'color={state_color}, textcolor=color.white, style=label.style_label_left, size=size.small)'
+    last_bos_type = result.get("last_bos_type") or "—"
+    state_col     = (
+        "c_structure"  if state == "bullish" else
+        "c_fvg_line"   if state == "bearish" else
+        "c_block_active"
     )
-    return lines
+    lines.append(
+        f'    label.new(bar_index+1, {current_price}, '
+        f'"MS: {state} ({last_bos_type}) | {bars_in_state} bars | ATR:{atr}", '
+        f'color={state_col}, textcolor=color.white, '
+        f'style=label.style_label_left, size=size.small)'
+    )
+    return lines or _nothing("No swing points detected")
 
+
+# ── Fractals ──────────────────────────────────────────────────────────────────
 
 def _pine_fractals(result: dict, future_bars: int) -> list[str]:
+    """
+    Swing highs: c_structure triangle-down (fresh) / c_block_active (swept).
+    Swing lows:  c_block_active triangle-up (fresh) / c_block_mit (swept).
+    Price shown in label.
+    """
     lines = []
     for f in result.get("fractals", []):
         age   = max(1, int(f["age_bars"]))
@@ -400,12 +725,12 @@ def _pine_fractals(result: dict, future_bars: int) -> list[str]:
         ftype = f["type"]
         swept = f["is_swept"]
         if ftype == "swing_high":
+            color = "c_block_active" if swept else "c_structure"
             style = "label.style_triangledown"
-            color = "color.new(color.red, 50)"   if swept else "color.new(color.red, 0)"
             txt   = f"H {price}"
         else:
+            color = "c_block_mit" if swept else "c_block_active"
             style = "label.style_triangleup"
-            color = "color.new(color.green, 50)" if swept else "color.new(color.green, 0)"
             txt   = f"L {price}"
         lines.append(
             f'    label.new(bar_index-{age}, {price}, "{txt}", '
@@ -414,62 +739,128 @@ def _pine_fractals(result: dict, future_bars: int) -> list[str]:
     return lines or _nothing("No fractals detected")
 
 
+# ── Fib Zones ─────────────────────────────────────────────────────────────────
+
 def _pine_fib_zones(result: dict, bars: int, future_bars: int) -> list[str]:
+    """
+    Premium / Discount: c_block_active boxes.
+    OTE (61.8–78.6%): c_fvg_fill (hot zone).
+    EQ 50% line: c_structure dashed.
+    Key fib levels: c_block_active dotted.
+    """
     if result.get("status"):
         return _nothing(f"Fib zones: {result['status']}")
     lines = []
-    left = bars - 1
-    pz   = result.get("premium_zone", {})
-    dz   = result.get("discount_zone", {})
-    ote  = result.get("ote", {})
-    eq   = result.get("equilibrium")
-    key  = result.get("key_levels", {})
-    loc  = result.get("current_price_location", "")
-    in_ote = result.get("in_ote", False)
-    cur  = result.get("current_price", 0)
+    left      = bars - 1
+    pz        = result.get("premium_zone", {})
+    dz        = result.get("discount_zone", {})
+    ote       = result.get("ote", {})
+    eq        = result.get("equilibrium")
+    key       = result.get("key_levels", {})
+    loc       = result.get("current_price_location", "")
+    in_ote    = result.get("in_ote", False)
+    cur       = result.get("current_price", 0)
     fib_ratio = result.get("current_fib_ratio", 0)
+
     if pz.get("upper") and pz.get("lower"):
         lines.append(
             f'    box.new(bar_index-{left}, {pz["upper"]}, bar_index+{future_bars}, {pz["lower"]}, '
-            f'bgcolor=color.new(color.red, 90), border_color=color.new(color.red, 50), '
-            f'text="Premium", text_size=size.small)'
+            f'bgcolor=c_block_active, border_color=color.new(color.white, 100))'
+        )
+        lines.append(f'    if show_labels')
+        lines.append(
+            f'        label.new(bar_index-{left}+1, {pz["upper"]}, "Premium", '
+            f'color=color.new(color.white, 100), textcolor=color.black, '
+            f'style=label.style_none, size=size.small)'
         )
     if dz.get("upper") and dz.get("lower"):
         lines.append(
             f'    box.new(bar_index-{left}, {dz["upper"]}, bar_index+{future_bars}, {dz["lower"]}, '
-            f'bgcolor=color.new(color.green, 90), border_color=color.new(color.green, 50), '
-            f'text="Discount", text_size=size.small)'
+            f'bgcolor=c_block_active, border_color=color.new(color.white, 100))'
+        )
+        lines.append(f'    if show_labels')
+        lines.append(
+            f'        label.new(bar_index-{left}+1, {dz["lower"]}, "Discount", '
+            f'color=color.new(color.white, 100), textcolor=color.black, '
+            f'style=label.style_none, size=size.small)'
         )
     if ote.get("upper") and ote.get("lower"):
         lines.append(
             f'    box.new(bar_index-{left}, {ote["upper"]}, bar_index+{future_bars}, {ote["lower"]}, '
-            f'bgcolor=color.new(color.yellow, 82), border_color=color.yellow, '
-            f'text="OTE 61.8-78.6%", text_size=size.small)'
+            f'bgcolor=c_fvg_fill, border_color=c_fvg_line)'
+        )
+        lines.append(f'    if show_labels')
+        lines.append(
+            f'        label.new(bar_index-{left}+1, {ote["upper"]}, "OTE 61.8-78.6%", '
+            f'color=c_fvg_line, textcolor=color.white, '
+            f'style=label.style_none, size=size.small)'
         )
     if eq:
         lines += [
             f'    line.new(bar_index-{left}, {eq}, bar_index+{future_bars}, {eq}, '
-            f'color=color.white, style=line.style_dashed, width=1)',
-            f'    label.new(bar_index, {eq}, "EQ 50%", '
-            f'color=color.white, textcolor=color.black, style=label.style_label_left, size=size.tiny)',
+            f'color=c_structure, style=line.style_dashed, width=1)',
         ]
-    # Key fib lines
+        lines.append(f'    if show_labels')
+        lines.append(
+            f'        label.new(bar_index, {eq}, "EQ 50%", '
+            f'color=color.new(color.white, 100), textcolor=color.black, '
+            f'style=label.style_none, size=size.tiny)'
+        )
     for fib_key in ("0.0", "0.236", "0.382", "0.618", "0.786", "1.0"):
         price = key.get(fib_key)
         if price:
             lines += [
                 f'    line.new(bar_index-{left}, {price}, bar_index+{future_bars}, {price}, '
-                f'color=color.new(color.gray, 55), style=line.style_dotted, width=1)',
-                f'    label.new(bar_index-{left}, {price}, "{fib_key}", '
-                f'color=color.new(color.gray, 55), textcolor=color.white, '
-                f'style=label.style_label_right, size=size.tiny)',
+                f'color=c_block_active, style=line.style_dotted, width=1)',
             ]
+            lines.append(f'    if show_labels')
+            lines.append(
+                f'        label.new(bar_index-{left}, {price}, "{fib_key}", '
+                f'color=color.new(color.white, 100), textcolor=color.black, '
+                f'style=label.style_none, size=size.tiny)'
+            )
     ote_tag = " IN OTE!" if in_ote else ""
     lines.append(
         f'    label.new(bar_index, {cur}, "Loc: {loc}{ote_tag} | ratio: {fib_ratio:.3f}", '
-        f'color=color.white, textcolor=color.black, style=label.style_label_left, size=size.small)'
+        f'color=c_structure, textcolor=color.white, '
+        f'style=label.style_label_left, size=size.small)'
     )
     return lines
+
+
+# ── Compression ───────────────────────────────────────────────────────────────
+
+def _pine_compression(result: dict, df: pd.DataFrame, future_bars: int) -> list[str]:
+    """
+    Active: c_fvg_fill (hot — price is coiling).
+    Ended:  c_block_active (neutral).
+    """
+    if result.get("status"):
+        return _nothing(f"Compression: {result['status']}")
+    lines = []
+    for c in result.get("compressions", []):
+        age_end   = max(1, c["bars_since_end"])
+        age_start = age_end + c["bars"] - 1
+        ph, pl    = _compression_bounds(df, c["start_ts"], c["end_ts"])
+        if ph is None:
+            continue
+        is_active = c["is_active"]
+        bg        = "c_fvg_fill"     if is_active else "c_block_active"
+        bc        = "c_fvg_line"     if is_active else "color.new(color.white, 100)"
+        txt = (f"COMP {'ACTIVE' if is_active else 'ended'} "
+               f"{c['bars']}b sq:{c['squeeze_ratio']}x "
+               f"tAtr:{c['tightest_range_atr']}")
+        lines.append(
+            f'    box.new(bar_index-{age_start}, {ph}, bar_index-{age_end}, {pl}, '
+            f'bgcolor={bg}, border_color={bc})'
+        )
+        lines.append(f'    if show_labels')
+        lines.append(
+            f'        label.new(bar_index-{age_start}+1, {ph}, "{txt}", '
+            f'color=color.new(color.white, 100), textcolor=color.black, '
+            f'style=label.style_none, size=size.tiny)'
+        )
+    return lines or _nothing("No compressions detected")
 
 
 def _compression_bounds(df: pd.DataFrame, start_ts: str, end_ts: str) -> tuple[float | None, float | None]:
@@ -491,30 +882,13 @@ def _compression_bounds(df: pd.DataFrame, start_ts: str, end_ts: str) -> tuple[f
         return None, None
 
 
-def _pine_compression(result: dict, df: pd.DataFrame, future_bars: int) -> list[str]:
-    if result.get("status"):
-        return _nothing(f"Compression: {result['status']}")
-    lines = []
-    for c in result.get("compressions", []):
-        age_end   = max(1, c["bars_since_end"])
-        age_start = age_end + c["bars"] - 1
-        ph, pl    = _compression_bounds(df, c["start_ts"], c["end_ts"])
-        if ph is None:
-            continue
-        is_active = c["is_active"]
-        bg = "color.new(color.yellow, 82)" if is_active else "color.new(color.gray, 82)"
-        bc = "color.yellow"                if is_active else "color.gray"
-        txt = (f"COMP {'active' if is_active else 'ended'} "
-               f"{c['bars']}b sq:{c['squeeze_ratio']}x "
-               f"tAtr:{c['tightest_range_atr']}")
-        lines.append(
-            f'    box.new(bar_index-{age_start}, {ph}, bar_index-{age_end}, {pl}, '
-            f'bgcolor={bg}, border_color={bc}, text="{txt}", text_size=size.tiny)'
-        )
-    return lines or _nothing("No compressions detected")
-
+# ── Sponsored Candle ──────────────────────────────────────────────────────────
 
 def _pine_sponsored_candle(result: dict, future_bars: int) -> list[str]:
+    """
+    High-quality OB — same block style as OB: c_block_active / c_block_mit.
+    Sweep side shown in label.
+    """
     if result.get("status"):
         return _nothing(f"Sponsored candle: {result['status']}")
     lines = []
@@ -522,57 +896,94 @@ def _pine_sponsored_candle(result: dict, future_bars: int) -> list[str]:
         age      = max(1, int(z["age_bars"]))
         top, bot = z["high"], z["low"]
         ztype    = z["ob_type"]
-        mit      = "mit" if z["is_mitigated"] else "active"
+        mit      = z.get("is_mitigated", False)
         sw_side  = z.get("sweep_side", "?")[:3]
-        bg = "color.new(color.lime, 68)"    if ztype == "bullish" else "color.new(color.fuchsia, 68)"
-        bc = "color.lime"                   if ztype == "bullish" else "color.fuchsia"
-        arrow = "U" if ztype == "bullish" else "D"
-        lines.append(
-            f'    box.new(bar_index-{age}, {top}, bar_index+{future_bars}, {bot}, '
-            f'bgcolor={bg}, border_color={bc}, '
-            f'text="SpC{arrow} {mit} sw:{sw_side}", text_size=size.tiny)'
-        )
+        arrow    = "↑" if ztype == "bullish" else "↓"
+        label    = f"SpC{arrow} sw:{sw_side}"
+        if mit:
+            lines.append(
+                f'    box.new(bar_index-{age}, {top}, bar_index, {bot}, '
+                f'bgcolor=c_block_mit, border_color=color.new(color.white, 100))'
+            )
+            lines.append(f'    if show_labels')
+            lines.append(
+                f'        label.new(bar_index-{age}+1, {top}, "{label} mit", '
+                f'color=color.new(color.white, 100), textcolor=color.black, '
+                f'style=label.style_none, size=size.tiny)'
+            )
+        else:
+            lines.append(
+                f'    box.new(bar_index-{age}, {top}, bar_index+{future_bars}, {bot}, '
+                f'bgcolor=c_block_active, border_color=color.new(color.white, 100))'
+            )
+            lines.append(f'    if show_labels')
+            lines.append(
+                f'        label.new(bar_index-{age}+1, {top}, "{label}", '
+                f'color=color.new(color.white, 100), textcolor=color.black, '
+                f'style=label.style_none, size=size.tiny)'
+            )
     return lines or _nothing("No sponsored candles detected")
 
 
+# ── Absorption at POI ─────────────────────────────────────────────────────────
+
 def _pine_absorption_poi(result: dict, future_bars: int) -> list[str]:
+    """
+    Absorbed: c_fvg_fill with c_fvg_line border (hot = trade setup).
+    Not absorbed: c_block_active (neutral).
+    Debug metrics shown in side label.
+    """
     poi_zone = result.get("poi_zone")
     poi_type = result.get("poi_type", "none")
     reversal = result.get("reversal_direction", "none")
     absorbed = result.get("absorption_detected", False)
     poi_hit  = result.get("poi_hit", False)
     if not poi_zone or poi_type == "none":
-        return _nothing(f"No POI absorption — poi_type: {poi_type} poi_hit: {poi_hit}")
+        return _nothing(f"No POI absorption — poi_type:{poi_type} hit:{poi_hit}")
     ph = poi_zone["high"]
     pl = poi_zone["low"]
-    bg = "color.new(color.yellow, 72)" if absorbed else "color.new(color.gray, 75)"
-    bc = "color.yellow"                if absorbed else "color.gray"
+    bg = "c_fvg_fill"   if absorbed else "c_block_active"
+    bc = "c_fvg_line"   if absorbed else "color.new(color.white, 100)"
     txt = f"Abs:{'YES' if absorbed else 'no'} | {poi_type} | rev:{reversal}"
     lines = [
         f'    box.new(bar_index-5, {ph}, bar_index+{future_bars}, {pl}, '
-        f'bgcolor={bg}, border_color={bc}, text="{txt}", text_size=size.small)',
+        f'bgcolor={bg}, border_color={bc})',
     ]
+    lines.append(f'    if show_labels')
+    lines.append(
+        f'        label.new(bar_index+{future_bars}+1, {round((ph+pl)/2, 2)}, "{txt}", '
+        f'color=color.new(color.white, 100), textcolor=color.black, '
+        f'style=label.style_none, size=size.small)'
+    )
     detail = result.get("absorption_detail", {})
     if detail:
-        mid = round((ph + pl) / 2, 2)
-        vr  = detail.get("vol_ratio", 0)
-        cp  = detail.get("close_position", 0)
-        ar  = detail.get("range_atr_ratio", 0)
+        vr = detail.get("vol_ratio", 0)
+        cp = detail.get("close_position", 0)
+        ar = detail.get("range_atr_ratio", 0)
+        lines.append(f'    if show_labels')
         lines.append(
-            f'    label.new(bar_index+{future_bars+1}, {mid}, '
-            f'"vol_ratio:{vr:.2f} close_pos:{cp:.2f} atr_ratio:{ar:.2f}", '
-            f'style=label.style_label_left, color=color.black, textcolor=color.white, size=size.tiny)'
+            f'        label.new(bar_index+{future_bars}+1, {pl}, '
+            f'"vol:{vr:.2f} cls:{cp:.2f} atr:{ar:.2f}", '
+            f'color=color.new(color.white, 100), textcolor=color.black, '
+            f'style=label.style_none, size=size.tiny)'
         )
     return lines
 
 
+# ── Cumulative Delta ──────────────────────────────────────────────────────────
+
 def _pine_cumulative_delta(result: dict, df: pd.DataFrame, future_bars: int) -> list[str]:
+    """
+    Session delta trend label: c_fvg_line if negative (warning), c_structure if positive.
+    CD divergence markers: c_fvg_line triangles (divergence = alert regardless of direction).
+    """
     if result.get("status"):
         return _nothing(f"Cumulative delta: {result['status']}")
     lines = []
     trend = result.get("delta_trend", "neutral")
     delta = result.get("session_delta", 0)
-    tc    = "color.green" if trend == "positive" else ("color.red" if trend == "negative" else "color.gray")
+    # Negative delta (selling pressure) = c_fvg_line, positive = c_structure
+    tc = "c_fvg_line" if trend == "negative" else ("c_structure" if trend == "positive" else "c_block_active")
     lines.append(
         f'    label.new(bar_index+1, close, "CD session:{delta:.1f} trend:{trend}", '
         f'color={tc}, textcolor=color.white, style=label.style_label_left, size=size.small)'
@@ -584,18 +995,24 @@ def _pine_cumulative_delta(result: dict, df: pd.DataFrame, future_bars: int) -> 
         if not (price and bar_ts):
             continue
         age   = _ts_to_age(df, bar_ts)
-        dc    = "color.red"   if dtype == "bearish" else "color.green"
-        ds    = "label.style_triangledown" if dtype == "bearish" else "label.style_triangleup"
+        # Both divergence types = c_fvg_line (red = disagreement between price and delta)
+        style = "label.style_triangledown" if dtype == "bearish" else "label.style_triangleup"
         lines.append(
             f'    label.new(bar_index-{age}, {price}, "CD div {dtype}", '
-            f'color={dc}, textcolor=color.white, style={ds}, size=size.small)'
+            f'color=c_fvg_line, textcolor=color.white, style={style}, size=size.small)'
         )
     if len(lines) == 1:
         lines.append(_nothing("No CD divergences")[0])
     return lines
 
 
+# ── CD Divergence at Structure ────────────────────────────────────────────────
+
 def _pine_cd_divergence(result: dict, df: pd.DataFrame, future_bars: int) -> list[str]:
+    """
+    Detected: c_fvg_line for bearish div (red = alert), c_structure for bullish.
+    Sweep marker: c_fvg_line label_up.
+    """
     if result.get("reason"):
         return _nothing(f"CDdiv: {result['reason']}")
     detected    = result.get("divergence_detected", False)
@@ -608,69 +1025,91 @@ def _pine_cd_divergence(result: dict, df: pd.DataFrame, future_bars: int) -> lis
     sweep_ts    = result.get("sweep_ts")
     if not (detected and level):
         return _nothing(
-            f"No CD div at structure | type:{dtype} at_struct:{at_struct} strength:{strength}"
+            f"No CD div | type:{dtype} at_struct:{at_struct} strength:{strength}"
         )
-    bc = "color.red" if dtype == "bearish" else "color.green"
-    txt = f"CD {dtype} @ {struct_type} | {strength}{' | swept' if sweep_prec else ''}"
+    # Bearish divergence = c_fvg_line (red), bullish = c_structure (black)
+    lc  = "c_fvg_line" if dtype == "bearish" else "c_structure"
+    txt = f"CD {dtype} @ {struct_type} | {strength}{'  swept' if sweep_prec else ''}"
     lines = [
         f'    line.new(0, {level}, bar_index+{future_bars}, {level}, '
-        f'color={bc}, style=line.style_dashed, width=2)',
-        f'    label.new(bar_index, {level}, "{txt}", '
-        f'color={bc}, textcolor=color.white, style=label.style_label_left, size=size.small)',
+        f'color={lc}, style=line.style_dashed, width=2)',
     ]
+    lines.append(f'    if show_labels')
+    lines.append(
+        f'        label.new(bar_index, {level}, "{txt}", '
+        f'color={lc}, textcolor=color.white, '
+        f'style=label.style_label_left, size=size.small)'
+    )
     if sweep_prec and sweep_ts:
         age = _ts_to_age(df, sweep_ts)
         lines.append(
-            f'    label.new(bar_index-{age}, {level}, "SWEEP", '
-            f'color=color.orange, textcolor=color.black, style=label.style_label_up, size=size.tiny)'
+            f'    label.new(bar_index-{age}, {level}, "✕ SWEEP", '
+            f'color=c_fvg_line, textcolor=color.white, '
+            f'style=label.style_label_up, size=size.tiny)'
         )
     return lines
 
 
+# ── Killzone ──────────────────────────────────────────────────────────────────
+
 def _pine_killzone(result: dict) -> list[str]:
+    """
+    Session state table (top-right).
+    Active killzone / OTT: c_fvg_line (red highlight).
+    Inactive / neutral: c_block_active.
+    Friday: c_structure (black = caution).
+    """
     kz      = result.get("active_killzone") or "none"
     next_kz = result.get("next_killzone") or "—"
     t_str   = result.get("kyiv_time", "")
     weekday = result.get("weekday", "")
     ott     = result.get("in_ott_window", False)
     is_fri  = result.get("is_friday", False)
-    kz_c    = "color.yellow" if kz != "none" else "color.gray"
-    ott_c   = "color.yellow" if ott else "color.gray"
-    fri_c   = "color.orange" if is_fri else "color.gray"
+    kz_c    = "c_fvg_line"     if kz != "none" else "c_block_active"
+    ott_c   = "c_fvg_line"     if ott          else "c_block_active"
+    fri_c   = "c_structure"    if is_fri       else "c_block_active"
     return [
         f'    var _kzt = table.new(position.top_right, 2, 5, '
-        f'bgcolor=color.new(color.black, 80), frame_color=color.gray, frame_width=1)',
-        f'    table.cell(_kzt, 0, 0, "Killzone",  text_color=color.white, text_size=size.small)',
+        f'bgcolor=color.new(color.white, 10), frame_color=c_block_active, frame_width=1)',
+        f'    table.cell(_kzt, 0, 0, "Killzone",  text_color=c_block_active, text_size=size.small)',
         f'    table.cell(_kzt, 1, 0, "{kz}",       text_color={kz_c}, text_size=size.small)',
-        f'    table.cell(_kzt, 0, 1, "Kyiv time",  text_color=color.white, text_size=size.small)',
-        f'    table.cell(_kzt, 1, 1, "{t_str} {weekday}", text_color=color.white, text_size=size.small)',
-        f'    table.cell(_kzt, 0, 2, "OTT window", text_color=color.white, text_size=size.small)',
+        f'    table.cell(_kzt, 0, 1, "Kyiv time",  text_color=c_block_active, text_size=size.small)',
+        f'    table.cell(_kzt, 1, 1, "{t_str} {weekday}", text_color=c_structure, text_size=size.small)',
+        f'    table.cell(_kzt, 0, 2, "OTT window", text_color=c_block_active, text_size=size.small)',
         f'    table.cell(_kzt, 1, 2, "{"YES" if ott else "no"}", text_color={ott_c}, text_size=size.small)',
-        f'    table.cell(_kzt, 0, 3, "Next KZ",    text_color=color.white, text_size=size.small)',
-        f'    table.cell(_kzt, 1, 3, "{next_kz}",  text_color=color.white, text_size=size.small)',
-        f'    table.cell(_kzt, 0, 4, "Friday",     text_color=color.white, text_size=size.small)',
+        f'    table.cell(_kzt, 0, 3, "Next KZ",    text_color=c_block_active, text_size=size.small)',
+        f'    table.cell(_kzt, 1, 3, "{next_kz}",  text_color=c_structure, text_size=size.small)',
+        f'    table.cell(_kzt, 0, 4, "Friday",     text_color=c_block_active, text_size=size.small)',
         f'    table.cell(_kzt, 1, 4, "{"YES" if is_fri else "no"}", text_color={fri_c}, text_size=size.small)',
     ]
 
 
+# ── Multi-TF Alignment ────────────────────────────────────────────────────────
+
 def _pine_multi_tf(result: dict, htf: str, ltf: str) -> list[str]:
+    """
+    MTF alignment table (top-left).
+    Aligned / bullish bias = c_structure (black = clear/positive).
+    Not aligned / bearish = c_fvg_line (red = conflict/alert).
+    desync = c_fvg_line.
+    """
     aligned = result.get("aligned", False)
     bias    = result.get("htf_bias", "unknown")
     role    = result.get("ltf_role", "unknown")
     sync    = result.get("sync_quality", "unknown")
-    al_c    = "color.green" if aligned else "color.red"
-    bias_c  = "color.green" if bias == "bullish" else ("color.red" if bias == "bearish" else "color.gray")
-    sync_c  = {"strong": "color.green", "weak": "color.orange", "desync": "color.red"}.get(sync, "color.gray")
+    al_c    = "c_structure"   if aligned             else "c_fvg_line"
+    bias_c  = "c_structure"   if bias == "bullish"   else ("c_fvg_line" if bias == "bearish" else "c_block_active")
+    sync_c  = {"strong": "c_structure", "weak": "c_block_active", "desync": "c_fvg_line"}.get(sync, "c_block_active")
     return [
         f'    var _mtft = table.new(position.top_left, 2, 4, '
-        f'bgcolor=color.new(color.black, 80), frame_color=color.gray, frame_width=1)',
-        f'    table.cell(_mtft, 0, 0, "MTF Align ({htf}/{ltf})", text_color=color.white, text_size=size.small)',
+        f'bgcolor=color.new(color.white, 10), frame_color=c_block_active, frame_width=1)',
+        f'    table.cell(_mtft, 0, 0, "MTF Align ({htf}/{ltf})", text_color=c_block_active, text_size=size.small)',
         f'    table.cell(_mtft, 1, 0, "{"YES" if aligned else "NO"}", text_color={al_c}, text_size=size.small)',
-        f'    table.cell(_mtft, 0, 1, "HTF bias ({htf})",          text_color=color.white, text_size=size.small)',
+        f'    table.cell(_mtft, 0, 1, "HTF bias ({htf})",          text_color=c_block_active, text_size=size.small)',
         f'    table.cell(_mtft, 1, 1, "{bias}",                    text_color={bias_c}, text_size=size.small)',
-        f'    table.cell(_mtft, 0, 2, "LTF role ({ltf})",          text_color=color.white, text_size=size.small)',
-        f'    table.cell(_mtft, 1, 2, "{role}",                    text_color=color.white, text_size=size.small)',
-        f'    table.cell(_mtft, 0, 3, "Sync quality",              text_color=color.white, text_size=size.small)',
+        f'    table.cell(_mtft, 0, 2, "LTF role ({ltf})",          text_color=c_block_active, text_size=size.small)',
+        f'    table.cell(_mtft, 1, 2, "{role}",                    text_color=c_structure, text_size=size.small)',
+        f'    table.cell(_mtft, 0, 3, "Sync quality",              text_color=c_block_active, text_size=size.small)',
         f'    table.cell(_mtft, 1, 3, "{sync}",                    text_color={sync_c}, text_size=size.small)',
     ]
 
@@ -695,21 +1134,18 @@ def main() -> None:
                         help="Print all available detector names and exit.")
     args = parser.parse_args()
 
-    # ── --list ────────────────────────────────────────────────────────────────
     if args.list:
         print("Available detectors:")
         for name in _ALL_DETECTOR_NAMES:
             print(f"  {name}")
         return
 
-    # ── --detector validation ─────────────────────────────────────────────────
     selected: str | None = args.detector
     if selected is not None and selected not in _ALL_DETECTOR_NAMES:
         print(f"error: unknown detector '{selected}'")
         print(f"Available: {', '.join(_ALL_DETECTOR_NAMES)}")
         sys.exit(1)
 
-    # Set of names that will actually run (all, or just one)
     active_names: frozenset[str] = (
         frozenset({selected}) if selected else frozenset(_ALL_DETECTOR_NAMES)
     )
@@ -723,13 +1159,12 @@ def main() -> None:
 
     htf = _HTF_MAP.get(tf, "4h")
 
-    # ── Fetch data — only what the selected detector(s) actually need ─────────
     print(f"Fetching {symbol} spot — {tf} × {bars} bars …")
     source = BinanceSource(market="spot")
     df = source.get_ohlc(symbol, tf, bars)
     print(f"  OK — {len(df)} bars  {df.index[0]}  →  {df.index[-1]}")
 
-    df_delta = df  # default fallback; replaced below if needed
+    df_delta = df
     if active_names & _NEEDS_DELTA:
         print(f"Fetching delta data ({tf}) …")
         try:
@@ -754,7 +1189,6 @@ def main() -> None:
         htf_ms_result = ltf_ms_result
 
     # ── Build task list ───────────────────────────────────────────────────────
-    # Each entry: (detector_name, run_callable, pine_callable)
     tasks = [
         ("detect_fvg",
             lambda: detect_fvg(df),
@@ -785,7 +1219,7 @@ def main() -> None:
             lambda r: _pine_liquidity(r, df, future_bars)),
 
         ("detect_bos",
-            lambda: detect_bos(df),
+            lambda: detect_bos(df, max_results=30),
             lambda r: _pine_bos(r, df, future_bars)),
 
         ("detect_volume_profile",
@@ -842,10 +1276,8 @@ def main() -> None:
             lambda r: _pine_multi_tf(r, htf, tf)),
     ]
 
-    # ── Filter to selected detector(s) ───────────────────────────────────────
     tasks = [t for t in tasks if t[0] in active_names]
 
-    # ── Run detectors in parallel, save sequentially ──────────────────────────
     print(f"\nRunning {len(tasks)} detector{'s' if len(tasks) != 1 else ''} …")
     results: dict[str, dict] = {}
     with ThreadPoolExecutor(max_workers=8) as ex:

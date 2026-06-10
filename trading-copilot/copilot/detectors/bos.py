@@ -1,19 +1,31 @@
 """
-Break of Structure (BOS) / Market Structure Shift (MSS) detector.
+Break of Structure (BOS) / Confirmed BOS (cBOS) detector.
 
-Terminology (per KB):
-- BOS  : break in the trend direction (continuation); new HH in bull trend or LL in bear trend.
-- cBOS : confirmed BOS — displacement candle whose body exceeds 1.5 × ATR(14).
-- MSS  : break AGAINST the current bias (structure shift / reversal signal).
+Algorithm mirrors smc.py (github.com/joshyattridge/smart-money-concepts) §bos_choch().
 
-Detection rule: candle CLOSE must breach the prior swing extreme (not just a wick).
+Terminology:
+- BOS  : break in the trend direction (continuation).
+         Bullish: [low,high,low,high] with HL+HH — close above prior high B.
+         Bearish: [high,low,high,low] with LH+LL  — close below prior low  B.
+- cBOS : structural shift / Change of Character (CHoCH in smc).
+         Bullish: [low,high,low,high] with LL+HH — reversal from bear to bull.
+         Bearish: [high,low,high,low] with HH+LL — reversal from bull to bear.
 
-Algorithm: scan swings FORWARD, maintaining a rolling reference to the most recent
-confirmed swing high and swing low.  At each bar we check whether the close crosses
-the current reference; bias updates on every confirmed break so later breaks are
-correctly classified as BOS (with trend) or MSS (against trend).
+Detection (per smc.py §bos_choch):
+  For each 4-swing window [A,B,C,D] with the right alternating type pattern:
+    1. Classify BOS or cBOS based on price relationships (same conditions as detect_market_structure).
+    2. Level to break = B (the 2nd swing — prior extreme in the trend direction).
+    3. Break bar = first bar AFTER C where close crosses B, up to and including D.
+       Using boundary swings (see _add_boundary_swings) D may land at bar n-1, so the
+       search naturally covers all remaining bars — equivalent to smc's "search to end".
+    4. Only confirmed breaks (break bar found) are emitted as events.
+
+Boundary swings (from _find_swings) are essential: the in-progress leg at the right
+edge of the chart is never a confirmed swing, so without them the last window is
+incomplete and no BOS fires on the current move.
 """
 
+import numpy as np
 import pandas as pd
 
 from copilot.detectors.market_structure import _find_swings
@@ -21,11 +33,10 @@ from copilot.detectors.market_structure import _find_swings
 TOOL_SCHEMA = {
     "name": "detect_bos",
     "description": (
-        "Detect Break of Structure (BOS), Confirmed BOS (cBOS), and Market Structure Shift (MSS) "
-        "events on a given timeframe.  Returns the most recent events newest-first with direction, "
-        "broken level, and break-candle body size relative to ATR. "
-        "BOS confirms trend continuation; cBOS adds displacement confirmation; "
-        "MSS signals a potential trend reversal."
+        "Detect Break of Structure (BOS) and Confirmed BOS (cBOS) events on a given "
+        "timeframe. Returns the most recent events newest-first with direction, broken "
+        "level, and break-candle body size relative to ATR. "
+        "BOS confirms trend continuation; cBOS signals a structural shift/reversal."
     ),
     "input_schema": {
         "type": "object",
@@ -40,6 +51,17 @@ TOOL_SCHEMA = {
         "required": ["symbol", "timeframe"],
     },
 }
+
+
+def _find_break_bar(closes, start: int, end: int, level: float, direction: str) -> int | None:
+    """Return first index in [start..end] where close breaks level, or None."""
+    end = min(end, len(closes) - 1)
+    for i in range(start, end + 1):
+        if direction == "above" and closes[i] > level:
+            return i
+        if direction == "below" and closes[i] < level:
+            return i
+    return None
 
 
 def detect_bos(
@@ -61,89 +83,81 @@ def detect_bos(
     opens_arr = df["open"].values
     closes_arr = df["close"].values
     tss = df.index
-    atr = float((df["high"] - df["low"]).rolling(14).mean().iloc[-1])
 
-    all_swings = _find_swings(df, swing_lookback)
-    if not all_swings:
-        return {"events": [], "count": 0, "latest_bias": "none"}
+    atr_arr = (df["high"] - df["low"]).rolling(14).mean().values
 
-    # Enrich each swing with its integer bar position so we can compare to loop index.
-    # _find_swings stores timestamps as str(pd.Timestamp); build a reverse map.
-    ts_to_pos = {str(ts): pos for pos, ts in enumerate(tss)}
-    for s in all_swings:
-        s["idx"] = ts_to_pos.get(s["ts"], -1)
+    def _atr_at(i: int) -> float:
+        v = atr_arr[i]
+        if np.isnan(v):
+            v = float(np.nanmean(atr_arr[: i + 1]))
+        return v if v > 0 else 1.0
 
-    swing_highs = sorted(
-        [s for s in all_swings if s["type"] == "high" and s["idx"] >= 0],
-        key=lambda s: s["idx"],
-    )
-    swing_lows = sorted(
-        [s for s in all_swings if s["type"] == "low" and s["idx"] >= 0],
-        key=lambda s: s["idx"],
-    )
+    # _find_swings = raw + dedup + boundary guards (mirrors smc.py §swing_highs_lows).
+    # Boundary swings ensure the in-progress leg at the right edge is included in the
+    # 4-swing window so BOS fires on the current move, not only on historical ones.
+    swings = _find_swings(df, swing_lookback)
 
-    if not swing_highs and not swing_lows:
+    if len(swings) < 4:
         return {"events": [], "count": 0, "latest_bias": "none"}
 
     events: list[dict] = []
-    current_bias: str = "none"
 
-    # Pointers into swing_highs / swing_lows: -1 = no swing seen yet.
-    h_ptr: int = -1
-    l_ptr: int = -1
-    # Remember which pointer value we last broke to avoid re-detecting the same swing.
-    broken_h_ptr: int | None = None
-    broken_l_ptr: int | None = None
+    for w in range(len(swings) - 3):
+        A, B, C, D = swings[w], swings[w + 1], swings[w + 2], swings[w + 3]
+        types = [A["type"], B["type"], C["type"], D["type"]]
 
-    scan_start = swing_lookback * 2
-
-    for i in range(scan_start, len(df)):
-        # Advance to the last confirmed swing high/low with idx < i.
-        while h_ptr + 1 < len(swing_highs) and swing_highs[h_ptr + 1]["idx"] < i:
-            h_ptr += 1
-        while l_ptr + 1 < len(swing_lows) and swing_lows[l_ptr + 1]["idx"] < i:
-            l_ptr += 1
-
-        ref_h = swing_highs[h_ptr] if h_ptr >= 0 else None
-        ref_l = swing_lows[l_ptr] if l_ptr >= 0 else None
-
-        c = closes_arr[i]
-        body = abs(closes_arr[i] - opens_arr[i])
-        ts = tss[i]
-
-        # ── Bullish break: close above the current reference swing high ──
-        if ref_h is not None and c > ref_h["price"] and h_ptr != broken_h_ptr:
-            bos_type = "MSS" if current_bias == "bearish" else "BOS"
-            if bos_type == "BOS" and body > 1.5 * atr:
-                bos_type = "cBOS"
+        # --- Bullish: [low, high, low, high] ---
+        # Level to break = B (prior swing high).
+        # BOS : C > A (HL) and D > B (HH) — continuation.
+        # cBOS: C < A (LL) and D > B (HH) — reversal / Change of Character.
+        if types == ["low", "high", "low", "high"]:
+            level = B["price"]
+            if D["price"] <= level:
+                # D must exceed the prior high for there to be any break candidate.
+                continue
+            bos_type = "BOS" if C["price"] > A["price"] else "cBOS"
+            # Search for first close above B in (C, D] — mirrors smc.py close_break logic.
+            # D may be a synthetic boundary at bar n-1, so this naturally covers all
+            # remaining bars (equivalent to smc's unbounded "search to end").
+            break_idx = _find_break_bar(closes_arr, C["idx"] + 1, D["idx"], level, "above")
+            if break_idx is None:
+                continue
+            body = abs(closes_arr[break_idx] - opens_arr[break_idx])
+            atr_val = _atr_at(break_idx)
             events.append({
                 "type": bos_type,
                 "direction": "bullish",
-                "broken_level": round(ref_h["price"], 2),
-                "break_ts": ts.isoformat(),
-                "break_candle_body_atr": round(body / atr, 2) if atr else 0,
+                "broken_level": round(level, 2),
+                "break_ts": tss[break_idx].isoformat(),
+                "break_candle_body_atr": round(body / atr_val, 2),
             })
-            current_bias = "bullish"
-            broken_h_ptr = h_ptr
 
-        # ── Bearish break: close below the current reference swing low ──
-        elif ref_l is not None and c < ref_l["price"] and l_ptr != broken_l_ptr:
-            bos_type = "MSS" if current_bias == "bullish" else "BOS"
-            if bos_type == "BOS" and body > 1.5 * atr:
-                bos_type = "cBOS"
+        # --- Bearish: [high, low, high, low] ---
+        # Level to break = B (prior swing low).
+        # BOS : C < A (LH) and D < B (LL) — continuation.
+        # cBOS: C > A (HH) and D < B (LL) — reversal / Change of Character.
+        elif types == ["high", "low", "high", "low"]:
+            level = B["price"]
+            if D["price"] >= level:
+                continue
+            bos_type = "BOS" if C["price"] < A["price"] else "cBOS"
+            break_idx = _find_break_bar(closes_arr, C["idx"] + 1, D["idx"], level, "below")
+            if break_idx is None:
+                continue
+            body = abs(closes_arr[break_idx] - opens_arr[break_idx])
+            atr_val = _atr_at(break_idx)
             events.append({
                 "type": bos_type,
                 "direction": "bearish",
-                "broken_level": round(ref_l["price"], 2),
-                "break_ts": ts.isoformat(),
-                "break_candle_body_atr": round(body / atr, 2) if atr else 0,
+                "broken_level": round(level, 2),
+                "break_ts": tss[break_idx].isoformat(),
+                "break_candle_body_atr": round(body / atr_val, 2),
             })
-            current_bias = "bearish"
-            broken_l_ptr = l_ptr
 
     events_out = list(reversed(events))[:max_results]
+    latest_bias = events[-1]["direction"] if events else "none"
     return {
         "events": events_out,
         "count": len(events_out),
-        "latest_bias": current_bias,
+        "latest_bias": latest_bias,
     }
