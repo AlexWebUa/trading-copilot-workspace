@@ -1,289 +1,82 @@
-# Trading Co-Pilot — Progress Report
-_Last updated: 2026-04-27_
+# Trading Co-Pilot — Current State
 
----
+_Last updated: 2026-06-22._ What exists and how trustworthy it is. Roadmap: [PLAN.md](PLAN.md). Design:
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Why the trust caveats: [docs/AUDIT_HISTORY.md](docs/AUDIT_HISTORY.md).
 
-## What this project is
+## Headline
 
-A Python system where Claude reads the user's SMC/ICT trading knowledge base as context, then calls algorithmic price detectors as tools over real OHLC data, and produces a structured market analysis. The trader reads the output and makes the final call — no order placement.
+All of Phases 1–6 + 8a are **built**. After the June 2026 audit, P0-1…P0-7 (source-data & evidence
+integrity) and P1-1 (test integrity) are **done**. The honest position today:
 
-Two usage modes built and working:
-- **CLI REPL** — `python -m copilot`, multi-turn chat, report saved to disk
-- **MCP server** — detectors exposed as tools in Claude Desktop / Cowork
+- **Trustworthy:** data layer (forming bar dropped), the smc-rewrapped core detectors (market_structure,
+  bos, order_block, liquidity, fvg/ifvg), CD (rewritten), volume profile, the backtest engine (look-ahead
+  fixed, two-sided costs), and the test suite (vacuous tests removed; probes encoded as regression tests).
+- **Analysis workflow revised (P1-2 done):** the system prompt now enforces an HTF-POI hard gate, a ranked
+  conflict hierarchy (MS > sweep > OB/FVG > orderflow), and the trader's position-management policy; the
+  noise-signal "upgrade POI quality" path and the calls to unregistered `check_*` composites were removed.
+  The `agent.py` multi-TF keying + anti-hallucination guard is fixed (P1-3).
+- **Still pending:** P1-4 (HIGH/MED/LOW probability assessment with listed reasons).
+- **No demonstrated edge yet.** The one re-baseline run found none, but it was narrow (1 symbol/TF, 2000
+  bars). Finding edge is the setup-R&D loop, still ahead.
 
-Full design rationale and architecture: see [PLAN.md](PLAN.md).
+## Detector inventory & verdicts
 
----
+Verdicts from [DETECTOR_REVIEW_2026-06-10.md](DETECTOR_REVIEW_2026-06-10.md); exposure enforced by
+`_QUARANTINED_TOOLS` in `copilot/llm/tools.py`.
 
-## Current state: Phases 1–6 + 9 cross-cutting improvements + Phase 8 composite detectors + backtest engine upgrades complete ✅
-
-### What's built and tested
-
-**Data layer** — Binance USD-M Futures (`fapi.binance.com`), parquet disk cache:
-- [`copilot/data/binance.py`](copilot/data/binance.py) — futures by default (`market="futures"`), spot available as fallback. Up to 1500 bars/request. Also fetches `taker_buy_base_vol` for CD detector.
-- [`copilot/data/cache.py`](copilot/data/cache.py) — TTL-based parquet cache, keyed `binance_futures_*`
-- [`copilot/data/normalize.py`](copilot/data/normalize.py) — canonical OHLCV schema shared by all detectors
-- [`copilot/data/base.py`](copilot/data/base.py) — `DataSource` protocol for future instrument sources
-
-**Detector library — Tier A (Phase 1)** — 8 pure functions, each with `TOOL_SCHEMA` co-located:
-
-| Detector | Concept | Key output fields |
+| Detector | State | Notes |
 |---|---|---|
-| `detect_market_structure` | HH/HL vs LH/LL swing state | `state`, `last_swing_high/low`, `strength` |
-| `detect_bos` | BOS / MSS / cBOS by candle close | `type`, `broken_level`, `displacement_atr_multiple` |
-| `detect_fvg` | 3-candle imbalance zones | `upper/lower`, `fill_state` (untouched/IOFED/CE_tagged) |
-| `detect_order_block` | Last opposing candle before impulse | `has_fvg_after`, `is_mitigated`, `distance_atr` |
-| `detect_liquidity` | EQH/EQL pools + wick sweeps | `buyside/sellside_liquidity`, `recent_sweeps` |
-| `detect_fib_zones` | Premium/Discount/OTE bands | `current_price_location`, `in_ote`, `key_levels` |
-| `detect_fractals` | 3-bar local extrema | `is_swept`, `age_bars` |
-| `check_multi_tf_alignment` | HTF vs LTF reconciliation | `ltf_role` (pullback/continuation), `sync_quality` |
+| `detect_fvg`, `detect_ifvg` | ✅ correct | exact bounds; `join_consecutive` merges impulse gaps |
+| `detect_volume_profile`, `check_poc_location`, `check_price_in_lvn` | ✅ correct | triangular dist. peaked at close |
+| `detect_market_structure`, `detect_bos` | ✅ rewrapped (P0-3) | wrap `smc.bos_choch`; no right-edge synthetic swing |
+| `detect_order_block` | ✅ rewrapped (P0-3) | swing-break scan over RAW confirmed swings (smc.ob inherits R1) |
+| `detect_liquidity` | ✅ rewrapped (P0-3) | side-typed close-back sweeps |
+| `detect_cumulative_delta` | ✅ rewritten (P0-5) | swing-to-swing divergence; pool-anchored sweep |
+| `detect_fractals`, `check_multi_tf_alignment`, `current_killzone`, `detect_fib_zones` | ✅ fixed (P2-1) | Williams 5-bar fractals + swept/broken; weekend gate; single MTF path; auto-direction OTE |
+| `detect_mitigation_block`, `detect_sponsored_candle`, `detect_breaker_block` | ✅ fixed (P2-2) | all on the shared swing-break OB (`scan_order_blocks`, R3); sponsored/mitigation use nearest-prior-pool sweeps (R4); breaker pierce = close-through |
+| `detect_rejection_block` | ⛔ quarantined | definition under manual revision by the trader (P2-1) |
+| `detect_compression`, `check_cd_absorption`, `check_absorption_at_poi`, `check_cd_divergence_at_structure` | ⛔ quarantined | hidden from the LLM until rewritten (P0-4) |
 
-**Detector library — Tier B (Phase 2)** — 7 additional pure functions:
+## What's built (modules)
 
-| Detector | Concept | Key output fields |
-|---|---|---|
-| `detect_ifvg` | Inverted FVG — polarity-flipped zone after full pierce | `type` (inverted), `is_tested`, `width_atr_fraction` |
-| `detect_breaker_block` | OB fully pierced → inverted polarity zone | `type` (inverted), `is_tested`, `original_ob_type` |
-| `detect_mitigation_block` | OB formed without prior liquidity sweep | `is_mitigated`, `note` (no prior sweep) |
-| `detect_rejection_block` | 2-candle body-engulf reversal zone | `type`, `c1_body_size_atr`, `is_mitigated`, `is_tested` |
-| `detect_sponsored_candle` | OB preceded by confirmed sweep — highest-quality OB | `sweep_ts`, `sweep_side`, `is_mitigated` |
-| `detect_compression` | LRLR narrowing range before expansion | `bars`, `squeeze_ratio`, `is_active`, `tightest_range_atr` |
-| `current_killzone` | Current Kyiv time + active killzone + OTT state | `active_killzone`, `in_ott_window`, `next_killzone` |
+- **`data/`** — Binance USD-M futures (`fapi.binance.com`, spot fallback), parquet TTL cache, canonical
+  OHLCV schema, `DataSource` protocol. Forming candle dropped. Delta from kline `taker_buy_base_vol`.
+- **`detectors/`** — 23 tools + `generate_pine_script` (parallel `ThreadPoolExecutor`, TradingView v5
+  overlay with `alertcondition()`s). `smc_lib.py` wraps `smartmoneyconcepts`.
+- **`llm/`** — `ToolRegistry` (auto-discovery, quarantine, request-scoped cache), multi-turn agent with
+  ephemeral KB prompt caching, report/trace/state persistence. Tool results keyed by `(name, symbol, tf)`
+  (no multi-TF overwrite); single assistant turn per round; `_verify_report_numbers` flags report prices
+  absent from every tool result (P1-3 done). `prompts.py` encodes the P1-2 workflow (HTF-POI hard gate,
+  conflict hierarchy, position management, `## HTF POI` + `## Management` report sections; reads volume-
+  profile fields directly instead of phantom `check_*` tools); `state.py` diff adds HTF-POI lifecycle
+  changes (OB mitigation, breaker tested, SC mitigated).
+- **`kb/`** — Obsidian loader + two-tier selector (always-core + keyword-triggered).
+- **`journal/`** — SQLite (WAL) at `~/.trading-copilot/journal/journal.db`; `TradeRecord` for live trades
+  and backtest entries; auto-migrations.
+- **`backtest/`** — bar-by-bar state machine (IDLE→SIGNAL→LTF_SCAN→IN_TRADE→IN_TRADE_P2), HTF conditions
+  with per-bar cache, partial TP, time exit, two-sided fees + slippage, walk-forward split. Built-in +
+  orderflow (Group A/B/C) rules. **All pre-fix backtest numbers were invalid; re-baseline found no edge.**
+- **`stats/`** — winrate / avg RR / profit factor / expectancy; group by setup/tool/session/dow/account/
+  htf_bias/record_type; tool-effectiveness Δwinrate ranking.
+- **`mcp_server.py`** — exposes the (non-quarantined) registry over stdio + a `save_trade` tool.
 
-**Detector library — Orderflow (Phase 4)** — 2 primary + 4 composite:
+## Tests
 
-| Detector | Concept | Key output fields |
-|---|---|---|
-| `detect_cumulative_delta` | Net buy pressure per bar (taker vol) | `session_delta`, `delta_trend`, `divergences`, `sweep_confirmation` |
-| `detect_volume_profile` | Price acceptance/rejection zones from OHLCV | `poc`, `vah`, `val`, `hvn_nodes`, `lvn_nodes`, `current_price_location` |
-| `check_ob_in_hvn` | OB price range overlaps ≥N% with any HVN node | `in_hvn`, `overlap_pct`, `hvn_price_mid` |
-| `check_poc_location` | Current price relative to POC | `location` (above/below/at_poc), `in_discount`, `in_premium` |
-| `check_price_in_lvn` | Is current close inside a thin-volume node? | `in_lvn`, `node` |
-| `check_cd_absorption` | High-vol + small-range + close-near-high proxy | `absorption_detected`, `vol_ratio`, `range_atr_ratio` |
-| `check_absorption_at_poi` | Absorption bars coinciding with unmitigated OBs or active FVGs | `absorbed`, `poi_type` (ob/fvg/ob+fvg), `poi_price`, `vol_ratio` |
-| `check_cd_divergence_at_structure` | CD divergence at key swing levels with sweep confirmation | `divergence`, `signal_strength` (weak/moderate/strong), `sweep_confirmed` |
+`354 collected: 351 passed + 3 xfailed, 0 failed` (`.venv/bin/python -m pytest`).
 
-Volume Profile uses **triangular distribution** peaked at the bar's close (rather than uniform) to weight volume toward the close — more accurate for liquid instruments.
+- `tests/test_probe_regression.py` — the 20 June probes as behavioral tests (13 pass + 7 `xfail(strict)`
+  documenting unfixed P2-tier bugs; flip to XPASS when fixed).
+- `tests/test_lookahead_regression.py` — guards the P0-2 backtest look-ahead fixes.
+- `tests/test_detectors_smc_rewrap.py` — guards the P0-3 rewraps.
+- `tests/test_agent_loop.py` — guards P1-3 (multi-TF result keying, single assistant turn,
+  `_verify_report_numbers`).
+- `tests/test_prompts_workflow.py` — guards P1-2 (HTF-POI gate + hierarchy + management present in the
+  prompt; phantom/quarantined tool names absent; `state.py` HTF-POI lifecycle diffs).
+- 2 breaker-block tests are `xfail(strict)` on the known P2-2 bug.
+- Vacuous schema tests removed (`test_detectors_liquidity.py` deleted; behavior now covered by probes).
 
-**Visualization tool:**
-
-| Tool | Purpose | Output |
-|---|---|---|
-| `generate_pine_script` | Runs all detectors in parallel and emits a ready-to-paste Pine Script v5 overlay | `pine_script` (copy into TradingView), `zone_count`, `summary` |
-
-Detectors run via `ThreadPoolExecutor(max_workers=9)` — parallel execution. Generated script includes `alertcondition()` calls at top level for BSL/SSL sweeps, FVG entries, OB touches, and VP POC/VAH/VAL crosses.
-
-Zone color legend:
-Teal/Red = FVG · Blue/Orange = OB · Lime/Maroon = IFVG · Aqua/Fuchsia = Breaker · Green/DarkRed = Mitigation Block · Navy/Purple = Rejection Block · Yellow dashed = BSL · Purple dashed = SSL
-
-**KB layer**:
-- [`copilot/kb/loader.py`](copilot/kb/loader.py) — reads Obsidian markdown, parses YAML frontmatter
-- [`copilot/kb/selector.py`](copilot/kb/selector.py) — two-tier injection: always-core + keyword-triggered per query
-
-**LLM layer** (CLI mode):
-- [`copilot/llm/tools.py`](copilot/llm/tools.py) — auto-discovers `TOOL_SCHEMA` from detector modules; request-scoped result cache keyed `(tool, symbol, tf, bars)` — cleared between MCP calls, reused within one `analyze()` pass
-- [`copilot/llm/agent.py`](copilot/llm/agent.py) — multi-turn tool-use loop, prompt caching on KB system block
-- [`copilot/llm/prompts.py`](copilot/llm/prompts.py) — system prompt builder with KB + session context + previous-analysis diff injection
-- [`copilot/llm/report.py`](copilot/llm/report.py) — saves reports to `~/.trading-copilot/reports/`
-- [`copilot/llm/trace.py`](copilot/llm/trace.py) — appends one JSONL record per tool call to `~/.trading-copilot/traces/{SYMBOL}_{YYYYMMDD}.jsonl`; large list fields trimmed to first 3 items + count
-- [`copilot/llm/state.py`](copilot/llm/state.py) — saves all detector results after each analysis to `~/.trading-copilot/reports/{SYMBOL}_{YYYYMMDD}.state.json`; loads previous state and injects a markdown diff (FVG fills, liquidity sweeps, POC shifts >0.5%, BOS changes) into the next analysis as `# Previous Analysis Context`
-
-**MCP server** (Claude Desktop / Cowork mode):
-- [`copilot/mcp_server.py`](copilot/mcp_server.py) — exposes **all 24 tools** (23 detectors + `generate_pine_script`) over stdio. Clears request-scoped cache before each dispatch.
-- [`claude_desktop_config.json`](claude_desktop_config.json) — ready-to-merge Desktop registration config
-- [`run_mcp.bat`](run_mcp.bat) — standalone launcher with correct PYTHONPATH
-
-**CLI REPL**:
-- [`copilot/cli.py`](copilot/cli.py) + [`copilot/session.py`](copilot/session.py)
-- Commands: `analyze`, `switch <SYMBOL>`, `model <name>`, `verbose`, `history`, `read <N>`
-- `log` — interactive prompt to record a new trade
-- `trades [--setup X] [--result Y] [--symbol S] [--last N] [--account A] [--tag T]` — filtered table view
-- `edit <id-prefix>` — update exit price, result, pnl_r, notes, tags
-- `backtest --rule <name> --tf <tf> --bars <N> [--no-write] [--split <ratio>]` — bar-by-bar simulation; `--split 0.7` runs IS/OOS walk-forward and prints both metric sections
-- `stats [--group setup|tool|session|dow|account|htf_bias] [--setup X] [--symbol S] [--last N]` — aggregated winrate / avg RR / profit factor / expectancy; `--group tool` shows tool-effectiveness ranking (Δwinrate vs baseline)
-
-**Tests — 281/281 pass** (`python -m pytest tests/`):
-
-| Test file | Count | Phase |
-|---|---|---|
-| `test_detectors_fvg.py` | 6 | 1 |
-| `test_detectors_ms.py` | 6 | 1 |
-| `test_detectors_bos.py` | 4 | 1 |
-| `test_detectors_liquidity.py` | 4 | 1 |
-| `test_detectors_ob.py` | 4 | 1 |
-| `test_multi_tf.py` | 5 | 1 |
-| `test_agent_loop.py` | 4 | 1 |
-| `test_detectors_ifvg.py` | 6 | 2 |
-| `test_detectors_breaker_block.py` | 5 | 2 |
-| `test_detectors_rejection_block.py` | 6 | 2 |
-| `test_detectors_compression.py` | 7 | 2 |
-| `test_detectors_sessions.py` | 8 | 2 |
-| `test_pine_script.py` | 11 | 2 |
-| `test_journal.py` | 33 | 3 |
-| `test_detectors_cumulative_delta.py` | 15 | 4 |
-| `test_detectors_volume_profile.py` | 17 | 4 |
-| `test_backtest_rules.py` | 32 | 5 |
-| `test_backtest_simulate.py` | 19 | 5 |
-| `test_backtest_engine.py` | 22 | 5 |
-| `test_backtest_compare.py` | — | 6 |
-| `test_backtest_rules_orderflow.py` | — | 6 |
-| `test_detectors_orderflow_composite.py` | — | 6 |
-| `test_stats_aggregator.py` | — | 6 |
-| `test_detectors_absorption_poi.py` | 6 | 8 |
-| `test_detectors_cd_divergence_structure.py` | 6 | 8 |
-
-**Journal module** (`copilot/journal/`):
-
-| File | Purpose |
-|---|---|
-| [`copilot/journal/record.py`](copilot/journal/record.py) | `TradeRecord` dataclass + `compute_rr`, `session_from_ts`, `parse_ts` utilities; includes `partial_exits: list[dict]` for partial-TP tracking |
-| [`copilot/journal/db.py`](copilot/journal/db.py) | SQLite connection with WAL mode + schema; `_apply_migrations()` auto-adds missing columns (e.g. `partial_exits`) to existing databases; deletes legacy `journal.jsonl` on first open |
-| [`copilot/journal/writer.py`](copilot/journal/writer.py) | `append_record` (`INSERT OR IGNORE`), `update_record` (SQL `UPDATE`) |
-| [`copilot/journal/reader.py`](copilot/journal/reader.py) | `load_all`, `filter_by` (SQL WHERE builder, 11 dimensions + tag post-filter), `get_by_id` (exact + prefix LIKE) |
-| [`copilot/journal/__init__.py`](copilot/journal/__init__.py) | Re-exports all public API |
-
-**Storage**: `~/.trading-copilot/journal/journal.db` — SQLite with WAL mode. List fields (`tp_prices`, `tools_confirmed`, `tags`, etc.) stored as JSON TEXT. Any legacy `journal.jsonl` is deleted on first open.
-
-**Backtest module** (`copilot/backtest/`):
-
-| File | Purpose |
-|---|---|
-| `rules.py` | `Condition`, `HTFCondition`, `TPLevel`, `SetupRule` dataclasses; `evaluate_conditions()`, `evaluate_conditions_on_slice()`; built-in rules; `build_detector_registry(include_delta=True/False)` |
-| `rules_orderflow.py` | Group A (VP-only), B (CD-only), C (VP+CD combined) orderflow-augmented rules; `sweep_cd_manipulation_long/short`, `poc_hvn_ob_long`, `sponsored_cd_ob_hvn_long`, `compression_vp_break_long` |
-| `simulate.py` | `simulated_exit()` (SL wins on same-bar conflict), `resolve_entry/sl/tp()` |
-| `engine.py` | `BacktestEngine.run()` — IDLE→SIGNAL→LTF_SCAN→IN_TRADE→IN_TRADE_P2 state machine; multi-TF HTF conditions with per-candle caching; LTF entry confirmation (5m scan within each HTF bar); partial TP + `sl_after_tp1`; time-based exit (`max_bars_open`); fee model (`fee_bps`); variable risk reporting (`risk_pct`, `pnl_pct_series`, `monthly_pnl_pct`); `walkforward_split` for IS/OOS split |
-| `report.py` | `trades_to_summary()` (includes `"expired"` result; `risk_pct`; `monthly_pnl_pct`), `print_summary()`, `print_walkforward()`, `write_summary_to_journal()` |
-| `compare.py` | `compare_live_vs_backtest()` — loads journal, splits live vs backtest records by `run_id`, prints side-by-side metrics |
-
-**Stats module** (`copilot/stats/`):
-
-| File | Purpose |
-|---|---|
-| `aggregator.py` | `compute_stats(records, group_by) → StatsResult`; metrics: winrate, avg RR, profit factor, expectancy; group by setup, tool, session, day_of_week, account_type, htf_bias, record_type |
-| `cli.py` | REPL `stats` command; `--group tool` shows Δwinrate per tool vs baseline (tool-effectiveness ranking) |
-
-**Detector bug fixes** (code review pass):
-- `sponsored_candle`: return key `"sponsored"` → `"candles"`, item key `"type"` → `"ob_type"` — Group C backtest rules were silently broken
-- `orderflow_composite.check_ob_in_hvn`: removed fallback to mitigated OB when no unmitigated OB found; returns `{in_hvn: false}` immediately instead
-- `liquidity._count_touches`: removed dead `is_high` branching (both branches were identical)
-
----
-
-## How to run
-
-### CLI REPL
-```bash
-cd D:\Projects\vibecoding\trading-copilot-workspace\trading-copilot
-
-# First time only
-cp .env.example .env
-# Edit .env → add ANTHROPIC_API_KEY=sk-ant-...
-pip install -e ".[dev]"
-
-python -m copilot
-python -m copilot --symbol ETHUSDT --verbose
-```
-
-### Claude Desktop (MCP)
-1. Merge [`claude_desktop_config.json`](claude_desktop_config.json) into `%APPDATA%\Claude\claude_desktop_config.json`
-2. Fully quit and relaunch Claude Desktop
-3. Hammer icon in chat input → 22 tools visible
-
-### Cowork project setup
-1. Create a Cowork project
-2. Attach KB files as project context:
-   - `knowledge_base/00_Index/_Global_Rules.md`
-   - `knowledge_base/01_Concepts/Multi_TF_Analysis.md`
-   - `knowledge_base/08_Entry_Models/Entry_Models.md`
-   - `knowledge_base/99_Glossary/Glossary.md`
-   - Any active setup notes (e.g. `09_Setups/1h3m_by_Bellissimo.md`)
-3. Paste system instruction from `COWORK_INSTRUCTION` in `mcp_server.py`
-4. Connect `trading-copilot` MCP server in project settings
-
----
-
-## Roadmap
-
-### Phase 3 — Trade Journal ✅ DONE
-Append-only SQLite DB at `~/.trading-copilot/journal/journal.db` (WAL mode). One `TradeRecord` per trade or backtest entry. New REPL commands: `log`, `trades`, `edit <id>`.
-
-### Phase 4 — Orderflow detectors ✅ DONE
-`detect_cumulative_delta` (Binance taker vol), `detect_volume_profile` (triangular-weighted OHLCV approximation), plus 4 composite meta-detectors: `check_ob_in_hvn`, `check_poc_location`, `check_price_in_lvn`, `check_cd_absorption`.
-
-### Phase 5 — Backtest engine ✅ DONE
-Bar-by-bar historical simulation. Strict look-ahead prevention. Results written to journal as `record_type="backtest"`. Walk-forward split (`--split N`) for IS/OOS validation.
-
-**Backtest engine upgrades (6 changes, landed after Phase 6):**
-1. **Multi-TF HTF Conditions** — `HTFCondition` dataclass; evaluated against pre-fetched HTF DataFrames, cached by `(htf_tf, detector, htf_bar_idx)` so each HTF candle is evaluated at most once
-2. **LTF Entry Confirmation** — 3-tier state machine (`_LTF_SCAN`); 5m bars scanned inside each HTF bar; `entry_tf`, `entry_conditions`, `entry_after_ltf`, `max_entry_wait_bars_ltf` fields on `SetupRule`
-3. **Partial TP + Trade Management** — `TPLevel` dataclass; `tp_levels`, `sl_after_tp1`; weighted-average `pnl_r` across `partial_exits`; `_IN_TRADE_P2` state for TP2 tracking
-4. **Time-Based Exit** — `max_bars_open` field; expired trades get `result="expired"` with RR-based win/loss classification in `report.py`
-5. **Fee Model** — `fee_bps` field; fee deducted in `_finalize_trade` using original SL as risk reference (not the moved-to-BE SL)
-6. **Variable Risk Reporting** — `risk_pct` field; `pnl_pct_series`, `total_pnl_pct`, `monthly_pnl_pct` in `BacktestSummary`
-
-### Phase 6 — Statistics aggregation ✅ DONE
-`copilot/stats/` — winrate, avg RR, profit factor, expectancy. Group by: setup, tool, session, day of week, account type, HTF bias, live vs backtest. Tool-effectiveness ranking: Δwinrate per confirmed tool vs baseline. Orderflow-augmented rules (Group A/B/C) in `rules_orderflow.py`. Live vs backtest comparison via `compare.py`.
-
-### Cross-cutting improvements ✅ DONE (landed alongside Phase 6)
-1. **Trace logs** — JSONL per tool call at `~/.trading-copilot/traces/{SYMBOL}_{YYYYMMDD}.jsonl`
-2. **Pine Script alerts** — `alertcondition()` at top level for BSL/SSL, FVG, OB, VP levels
-3. **Parallel detector execution** — `ThreadPoolExecutor(max_workers=9)` in `generate_pine_script`
-4. **VP triangular distribution** — volume weighted toward close within each bar's range
-5. **Request-scoped detector cache** — avoids recomputing same `(tool, symbol, tf, bars)` within one MCP call
-6. **CD rules in backtest** — `build_detector_registry(include_delta=True)` makes Group B/C rules actually fire
-7. **Walk-forward split** — `BacktestEngine.run(walkforward_split=0.7)` + `--split` CLI flag
-8. **Analysis state persistence** — detector results saved per session; markdown diff injected into next analysis system prompt
-9. **Journal: SQLite + WAL** — replaces JSONL; legacy file deleted on first open
-
-### Phase 7 — Dashboard TUI (next)
-`python -m copilot dashboard` → `rich` terminal UI: equity curve, rolling winrate, session heatmap, top setups by profit factor, tool leaderboard, worst conditions. Implemented with `rich.table` + `rich.panel`.
-
-### Phase 8 — Quality-of-life (ongoing)
-**Composite MCP detectors ✅ DONE:**
-- `check_absorption_at_poi` — identifies absorption bars (high volume, tiny range, close near high) coinciding with unmitigated OBs or active FVGs; returns `poi_type` (ob/fvg/ob+fvg) and `vol_ratio`
-- `check_cd_divergence_at_structure` — detects CD divergence at key structural swing levels with sweep confirmation; grades `signal_strength` as weak/moderate/strong; registered in `_DELTA_TOOLS`
-
-**Remaining:**
-- [ ] Scheduled reports at killzone times (09:00 / 15:00 / 17:00 Kyiv)
-- [ ] Embeddings-based KB retrieval if keyword matching proves brittle
-- [ ] Report archive browser in REPL (`history`, `read`)
-
-### Phase 9 — More instruments (after crypto workflow is solid)
-Deferred until Phases 3–7 are stable. Scope: **XAU/USD → EUR/USD → GER40 + EU50 → NAS100 + SP500**.
-Each = one new `copilot/data/*.py` implementing `DataSource`. Detectors unchanged.
-
----
-
-## Key design decisions
-
-| Decision | Rationale |
-|---|---|
-| Futures data by default | Discretionary traders trade perps, not spot; funding rates already priced in |
-| Detectors are pure functions | Unit-testable without live API; LLM gets compact JSON, not raw arrays |
-| `TOOL_SCHEMA` co-located with detector | Adding a detector = one file, zero registry changes (works for both CLI and MCP) |
-| MCP server reuses `ToolRegistry` | Single source of truth — schemas registered once, served to Anthropic API and Desktop identically |
-| Backward scan in BOS detector | Finds the *most recent* structural break, not the first mid-trend cBOS |
-| Prompt caching on KB system block | KB is large and stable per session → 70–90% token cost reduction on follow-ups |
-| KB read-only from `knowledge_base/` | KB evolves independently; co-pilot never writes to it |
-| `fill_state` enum over raw fill % | LLM reasons better over "CE_tagged" than "51.3%" |
-| `closed_back: true` on sweeps | Distinguishes confirmed wick-sweeps from mere touches — critical for 1h3m setup validation |
-| IFVG + Breaker: polarity-inversion pattern | Both are "zone that flipped" — shared logic, different formation path |
-| Mitigation Block: no-sweep qualifier | Distinguishes from Sponsored Candle — helps LLM explain WHY a zone is a draw |
-| `current_killzone` as MCP tool | Claude Desktop has no system clock access; tool gives it live Kyiv session context |
-| `detect_compression` returns `is_active` | LLM can immediately answer "is price coiling right now?" without post-processing |
-| `generate_pine_script` orchestrates all detectors | Single tool call gives the trader a paste-ready TradingView chart — no manual zone-drawing |
-| `_PASS_META_TOOLS` in registry | Pine Script needs symbol/tf for header labels — clean opt-in, doesn't touch other tool dispatch |
-| Binance klines for CD (not aggTrades) | `taker_buy_base_vol` in klines gives exact candle-level taker buy volume in a single request — aggTrades would need 200+ paginated calls for 24h BTC data |
-| `_DELTA_TOOLS` dispatch path in registry | Detectors needing `buy_vol/sell_vol/delta` opt into a separate fetch path — clean separation from plain OHLCV tools |
-| Volume Profile from OHLCV (not tick data) | Triangular distribution over `[low, high]` peaked at close is a practical approximation for liquid crypto — real VP requires L2 tick data unavailable via public REST |
-| SQLite WAL for journal | Concurrent reads during analysis don't block writes; WAL gives ~3× throughput vs default journal mode |
-| Request-scoped detector cache | Within one MCP call Claude may invoke the same detector twice; cache avoids redundant Binance fetches |
-| State persistence + diff injection | Analyst sees what changed since last run (filled FVGs, new sweeps, POC shifts) without re-reading old reports |
-| Walk-forward split in backtest | Single IS/OOS validation run via `--split N`; avoids manual dataset splitting |
-| `include_delta` flag in registry | CD detector opts into delta-enriched df — backtest engine enables it only for rules that need it |
-| HTF cache keyed `(htf_tf, detector, htf_bar_idx)` | Each HTF candle is evaluated at most once per bar loop — prevents redundant detector calls across HTF condition checks |
-| TP2 uses `original_sl` for RR math | After SL moves to BE, `original_sl` is passed to `_finalize_trade` and `_transition_to_p2` so TP2 price is still meaningful relative to original risk |
-| `_IN_TRADE_P2` checked before `_IN_TRADE` | State priority: trade management happens before new entry logic — prevents a partial-TP trade from re-entering `_IN_TRADE` logic on the same bar |
-| Fee deducted using `original_sl` as risk | After BE move the effective SL risk would collapse to 0; using original risk keeps fee_r a meaningful R fraction |
-| `evaluate_conditions_on_slice()` extracted | LTF entry conditions need the same operator logic as HTF conditions without requiring a full `SetupRule` — extracted so both callers share the implementation |
-| `partial_exits` in `TradeRecord` + auto-migration | Schema change handled by `_apply_migrations()` via `PRAGMA table_info` — existing databases gain the column without a manual migration step |
+## Two usage modes
+- **CLI REPL** — `.venv/bin/python -m copilot`; `analyze`, `switch`, `model`, `log`, `trades`, `edit`,
+  `backtest`, `compare`, `stats`, `history`, `read`.
+- **MCP server** — `./run_mcp.sh`; detectors as tools in Claude Desktop / Cowork (merge
+  `claude_desktop_config.json`).

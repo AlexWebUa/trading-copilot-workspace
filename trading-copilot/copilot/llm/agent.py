@@ -16,13 +16,13 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from typing import Any
 
-import anthropic
-
 from copilot.detectors.sessions import current_killzone
 from copilot.kb.selector import KBSelector
+from copilot.llm.client import AnthropicClient, LLMClient
 from copilot.llm.prompts import build_system_prompt
 from copilot.llm.report import save_report
 from copilot.llm.state import build_context_block, load_state, save_state
@@ -44,12 +44,13 @@ class TradingAgent:
         model: str | None = None,
         tool_registry: ToolRegistry | None = None,
         kb_selector: KBSelector | None = None,
+        llm_client: LLMClient | None = None,
     ):
         self.symbol = symbol.upper()
         self.model = model or os.getenv("COPILOT_MODEL", DEFAULT_MODEL)
         self._registry = tool_registry or ToolRegistry()
         self._kb = kb_selector or KBSelector()
-        self._client = anthropic.Anthropic()
+        self._client = llm_client or AnthropicClient()
         self._messages: list[dict] = []
 
     def reset(self) -> None:
@@ -80,23 +81,38 @@ class TradingAgent:
             if verbose:
                 print(f"  [turn {turn + 1}] calling {self.model}...", file=sys.stderr)
 
-            resp = self._client.messages.create(
+            resp = self._client.complete(
                 model=self.model,
                 system=system,
-                tools=self._registry.as_anthropic_tools(),
+                registry=self._registry,
                 messages=self._messages,
                 max_tokens=4096,
             )
 
-            self._messages.append({"role": "assistant", "content": resp.content})
+            self._messages.append(resp.assistant_message)
 
-            if resp.stop_reason != "tool_use":
-                # Extract text from final response
-                final_text = _extract_text(resp.content)
-                self._messages.append({
-                    "role": "assistant",
-                    "content": final_text,
-                })
+            if not resp.wants_tools:
+                # Final response. The assistant turn was already appended above
+                # — do NOT append it a second time, or the conversation history
+                # holds two adjacent assistant turns.
+                final_text = resp.text
+
+                # Anti-hallucination guard: every price-like number in the report
+                # must appear in at least one tool result. Fail loudly — but do not
+                # raise: the check is heuristic and a false positive must never
+                # discard a real analysis.
+                unverified = _verify_report_numbers(final_text, all_tool_results)
+                if unverified:
+                    print(
+                        f"  ⚠️  ANTI-HALLUCINATION: {len(unverified)} report value(s) "
+                        f"absent from every tool result: {', '.join(unverified[:12])}",
+                        file=sys.stderr,
+                    )
+                    write_trace(
+                        self.symbol, "_verify_report",
+                        {"unverified": unverified}, {"verified": False},
+                    )
+
                 # Persist report and analysis state
                 saved = save_report(self.symbol, final_text)
                 if all_tool_results:
@@ -106,21 +122,18 @@ class TradingAgent:
                 return final_text
 
             # Dispatch all tool calls
-            tool_results = []
-            for block in resp.content:
-                if block.type == "tool_use":
-                    if verbose:
-                        print(f"  [tool] {block.name}({json.dumps(block.input, ensure_ascii=False)[:120]})", file=sys.stderr)
-                    result = self._registry.dispatch(block.name, block.input)
-                    write_trace(self.symbol, block.name, block.input, result)
-                    all_tool_results[block.name] = result
-                    tool_results.append({
-                        "type": "tool_result",
-                        "tool_use_id": block.id,
-                        "content": json.dumps(result, default=str, ensure_ascii=False),
-                    })
+            tool_results: list[tuple[str, str]] = []
+            for call in resp.tool_calls:
+                if verbose:
+                    print(f"  [tool] {call.name}({json.dumps(call.input, ensure_ascii=False)[:120]})", file=sys.stderr)
+                result = self._registry.dispatch(call.name, call.input)
+                write_trace(self.symbol, call.name, call.input, result)
+                all_tool_results[_result_key(call.name, call.input)] = result
+                tool_results.append(
+                    (call.id, json.dumps(result, default=str, ensure_ascii=False))
+                )
 
-            self._messages.append({"role": "user", "content": tool_results})
+            self._messages.append(self._client.tool_result_message(tool_results))
 
         raise AgentLoopBudgetExceeded(
             f"Analysis did not complete within {MAX_TURNS} turns."
@@ -135,11 +148,78 @@ class TradingAgent:
         return list(self._messages)
 
 
-def _extract_text(content: list[Any]) -> str:
-    parts = []
-    for block in content:
-        if hasattr(block, "text"):
-            parts.append(block.text)
-        elif isinstance(block, dict) and block.get("type") == "text":
-            parts.append(block["text"])
-    return "\n".join(parts).strip()
+def _result_key(name: str, tool_input: dict) -> str:
+    """Key tool results by (name, symbol, timeframe).
+
+    One analysis calls the same detector on several timeframes (D1/H4/H1/M15/M3).
+    Keying by name alone made each call overwrite the previous one, so
+    save_state's cross-run diff only ever saw the last timeframe. The symbol
+    guards against the LLM probing a correlated symbol mid-analysis.
+    """
+    sym = tool_input.get("symbol")
+    tf = tool_input.get("timeframe")
+    if sym is None and tf is None:
+        return name  # no-DataFrame tools (multi_tf alignment, killzone)
+    return f"{name}@{sym or '?'}@{tf or '?'}"
+
+
+# Integer or decimal token; an optional thousands 'k' suffix is handled by the caller.
+_NUM_TOKEN = re.compile(r"(?<![\w.])(\d+(?:\.\d+)?)(k|K)?")
+
+
+def _collect_result_numbers(obj: Any, out: set[float]) -> None:
+    """Recursively gather numeric *field* values from tool results.
+
+    Strings are skipped on purpose — ISO timestamps would pollute the set with
+    year/month/day digits and mask real hallucinations.
+    """
+    if isinstance(obj, bool):
+        return
+    if isinstance(obj, (int, float)):
+        out.add(round(float(obj), 2))
+    elif isinstance(obj, dict):
+        for v in obj.values():
+            _collect_result_numbers(v, out)
+    elif isinstance(obj, (list, tuple)):
+        for v in obj:
+            _collect_result_numbers(v, out)
+
+
+def _verify_report_numbers(report_text: str, tool_results: dict[str, Any]) -> list[str]:
+    """Return the price-like tokens in the report that match no tool-result number.
+
+    Heuristic, tuned for false-positive avoidance: skips R-multiples / percentages /
+    timeframe labels (a digit immediately followed by a letter other than k), dates
+    (digit beside '-'), times (digit beside ':'), and sub-10 ratios/counts. A 'k'
+    suffix expands to thousands. Matching allows ~0.15% (min 1.0) tolerance so a
+    rounded restatement (66.8k vs an exact 66789.0) still verifies.
+    """
+    known: set[float] = set()
+    for r in tool_results.values():
+        _collect_result_numbers(r, known)
+
+    unverified: list[str] = []
+    seen: set[str] = set()
+    for m in _NUM_TOKEN.finditer(report_text):
+        raw = m.group(0)
+        suffix = m.group(2)
+        start, end = m.start(), m.end()
+        before = report_text[start - 1] if start > 0 else ""
+        after = report_text[end] if end < len(report_text) else ""
+
+        if after.isalpha() and after not in ("k", "K"):
+            continue  # 1.5R, 15m, 4h, 1d, "67bars"
+        if after == ":" or before == ":":
+            continue  # time component (09:00)
+        if after == "-" or before == "-":
+            continue  # date component (2026-06-19)
+
+        value = float(m.group(1)) * (1000 if suffix else 1)
+        if value < 10:
+            continue  # fib ratios, small counts
+
+        tol = max(1.0, value * 0.0015)
+        if raw not in seen and not any(abs(value - k) <= tol for k in known):
+            seen.add(raw)
+            unverified.append(raw)
+    return unverified

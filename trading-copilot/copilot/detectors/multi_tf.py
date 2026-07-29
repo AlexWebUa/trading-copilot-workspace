@@ -59,33 +59,24 @@ def check_multi_tf_alignment(
             "htf_bias": htf_state,
             "ltf_role": "unclear",
             "sync_quality": "desync",
+            "htf_timeframe": htf_timeframe,
+            "ltf_timeframe": ltf_timeframe,
             "note": "HTF is ranging — no directional bias to align with.",
         }
 
-    if ltf_state == htf_state:
-        # Both point the same direction: continuation / trending day
-        role = "continuation"
-        quality = "strong"
-    elif ltf_state == "ranging":
-        # LTF is consolidating inside HTF trend: pullback accumulating
-        role = "pullback"
-        quality = "weak"
-    else:
-        # LTF runs opposite to HTF: RTO (Reverse Trade Opportunity on correction)
-        role = "pullback"
-        quality = "strong"  # Per KB: clear counter-LTF move = clean RTO
-
+    # HTF is trending. One classification covers every LTF state coherently:
+    #   ltf == htf        → continuation (strong sync)
+    #   ltf == opposite   → pullback / RTO against the trend (strong sync)
+    #   ltf == ranging    → consolidating inside the trend (weak sync, but coherent)
     opposite = {"bullish": "bearish", "bearish": "bullish"}
-    if ltf_state == opposite.get(htf_state):
-        # This is the key SMC setup: LTF correction against HTF bias
-        ltf_role = "pullback"  # expect LTF to reverse and align with HTF
-        aligned = True
-    elif ltf_state == htf_state:
-        ltf_role = "continuation"
-        aligned = True
-    else:
-        ltf_role = "unclear"
-        aligned = False
+    if ltf_state == htf_state:
+        ltf_role, quality, aligned = "continuation", "strong", True
+    elif ltf_state == opposite[htf_state]:
+        # The key SMC setup: LTF correction against HTF bias; expect LTF to
+        # reverse and rejoin the HTF trend.
+        ltf_role, quality, aligned = "pullback", "strong", True
+    else:  # ltf_state == "ranging"
+        ltf_role, quality, aligned = "consolidation", "weak", True
 
     note = _build_note(htf_state, ltf_state, ltf_role, htf_timeframe, ltf_timeframe)
 
@@ -110,5 +101,10 @@ def _build_note(htf: str, ltf: str, role: str, htf_tf: str, ltf_tf: str) -> str:
         return (
             f"Both {htf_tf or 'HTF'} and {ltf_tf or 'LTF'} are {htf}. "
             f"Trend continuation mode — look for pullback entry on LTF before adding."
+        )
+    if role == "consolidation":
+        return (
+            f"{ltf_tf or 'LTF'} is ranging inside the {htf_tf or 'HTF'} {htf} trend. "
+            f"Wait for an LTF break in the {htf} direction (BOS + FVG/OB) before entering."
         )
     return "Ambiguous alignment — wait for clearer structure on LTF."

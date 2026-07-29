@@ -1,48 +1,40 @@
 """
 Mitigation Block detector.
 
-A Mitigation Block is an Order Block formed by an impulsive structural break
-that occurred WITHOUT sweeping the opposing liquidity pool first.
+A Mitigation Block is a (swing-break) Order Block formed by an impulsive
+structural break that occurred WITHOUT first sweeping the opposing liquidity
+pool (root causes R3 single-OB, R4 pool-anchored sweeps).
 
-Standard ICT flow:
-  Sellside liquidity swept → bullish OB → impulse up   (sponsored/clean)
-  Buyside  liquidity swept → bearish OB → impulse down (sponsored/clean)
+Standard ICT flow (sponsored / clean):
+  Sellside pool swept → bullish OB → impulse up
+  Buyside  pool swept → bearish OB → impulse down
 
 Mitigation Block flow (the anomaly):
-  Bullish impulse WITHOUT first sweeping the sellside low  → Bullish Mitigation Block
-  Bearish impulse WITHOUT first sweeping the buyside high  → Bearish Mitigation Block
+  Bullish OB without first sweeping the prior sellside pool → Bullish Mitigation Block
+  Bearish OB without first sweeping the prior buyside pool → Bearish Mitigation Block
 
 Consequence: because the opposing liquidity was NOT collected before the move,
-institutions MUST return to the Mitigation Block zone to complete their orders
-("mitigate" the remaining fills). This makes the zone a high-probability draw.
+institutions must return to the Mitigation Block zone to complete their orders
+("mitigate" the remaining fills) — a high-probability draw on price.
 
-Detection logic:
-  1. Same OB pattern as detect_order_block (opposing candle + impulse close).
-  2. In the `sweep_window` bars BEFORE the OB candle, check whether the opposing
-     liquidity pool (local swing extreme) was swept (wick + close-back confirmation).
-  3. If NO sweep preceded the OB → Mitigation Block.
-  4. Return unmitigated blocks (zone midpoint not yet visited by any wick).
+Detection:
+  1. Find swing-break OBs via the shared scan (the single OB universe).
+  2. The pool = the nearest prior swing extreme before the OB candle.
+  3. If NO sweep of that pool preceded the OB → Mitigation Block.
+  4. Return unmitigated blocks first.
 """
 
 import pandas as pd
 
-from copilot.detectors.utils import (
-    IMPULSE_ATR_THRESHOLD,
-    calc_atr,
-    calc_ob_zone,
-    extract_arrays,
-    find_sweep,
-    is_bearish_ob,
-    is_bullish_ob,
-    is_zone_mitigated,
-)
+from copilot.detectors.order_block import scan_order_blocks
+from copilot.detectors.utils import extract_arrays, find_sweep, is_zone_mitigated
 
 TOOL_SCHEMA = {
     "name": "detect_mitigation_block",
     "description": (
-        "Find Mitigation Blocks — Order Blocks formed without a prior liquidity sweep. "
-        "These zones are high-probability because institutions must return to complete "
-        "their orders ('mitigate'). "
+        "Find Mitigation Blocks — Order Blocks formed without first sweeping the prior opposing "
+        "liquidity pool. These zones are high-probability because institutions must return to "
+        "complete their orders ('mitigate'). "
         "Use when the market made an impulsive move but opposing stops were not taken first."
     ),
     "input_schema": {
@@ -56,10 +48,11 @@ TOOL_SCHEMA = {
             "lookback": {"type": "integer", "default": 100},
             "sweep_window": {
                 "type": "integer",
-                "default": 8,
-                "description": "Bars before the OB to check for a prior sweep",
+                "default": 5,
+                "description": "Bars up to the OB candle to check for a prior pool sweep",
             },
             "max_results": {"type": "integer", "default": 5},
+            "swing_lookback": {"type": "integer", "default": 5},
         },
         "required": ["symbol", "timeframe"],
     },
@@ -69,8 +62,9 @@ TOOL_SCHEMA = {
 def detect_mitigation_block(
     df: pd.DataFrame,
     lookback: int = 100,
-    sweep_window: int = 8,
+    sweep_window: int = 5,
     max_results: int = 5,
+    swing_lookback: int = 5,
 ) -> dict:
     if len(df) < 12:
         return {
@@ -81,62 +75,55 @@ def detect_mitigation_block(
             "count": 0,
         }
 
-    atr = calc_atr(df)
-    opens, highs, lows, closes, tss = extract_arrays(df)
+    from copilot.detectors.market_structure import _find_raw_swings
+
+    _, highs, lows, closes, tss = extract_arrays(df)
+    n = len(df)
+    raw = _find_raw_swings(df, swing_lookback)
+    swing_lows = [s for s in raw if s["type"] == "low"]
+    swing_highs = [s for s in raw if s["type"] == "high"]
 
     blocks: list[dict] = []
-    start_i = max(sweep_window + 1, len(df) - lookback - 1)
+    for c in scan_order_blocks(df, swing_lookback=swing_lookback, lookback=lookback):
+        ob_h, ob_l, ob_idx, brk = c["ob_high"], c["ob_low"], c["ob_idx"], c["break_idx"]
+        ws = max(0, ob_idx - sweep_window)
 
-    for i in range(start_i, len(df) - 2):
-        # ── Bullish OB: bearish candle → bullish impulse ──
-        if is_bullish_ob(closes, opens, highs, lows, i, atr):
-            ob_high, ob_low = calc_ob_zone(highs, lows, i)
+        if c["type"] == "bullish":
+            pool = _nearest_pool(swing_lows, ob_idx)
+            swept = pool is not None and find_sweep(
+                lows[ws:ob_idx + 1], closes[ws:ob_idx + 1], pool["price"], "sellside"
+            )[0]
+            if swept:
+                continue  # opposing liquidity collected → sponsored, not mitigation
+            is_mit = is_zone_mitigated(ob_h, ob_l, lows[brk + 1:], "bullish")
+            note = "bullish impulse without a prior sellside pool sweep"
+        else:
+            pool = _nearest_pool(swing_highs, ob_idx)
+            swept = pool is not None and find_sweep(
+                highs[ws:ob_idx + 1], closes[ws:ob_idx + 1], pool["price"], "buyside"
+            )[0]
+            if swept:
+                continue
+            is_mit = is_zone_mitigated(ob_h, ob_l, highs[brk + 1:], "bearish")
+            note = "bearish impulse without a prior buyside pool sweep"
 
-            # Look for a sellside sweep in the window before the OB:
-            # A wick below ob_low that closes back above ob_low → sellside swept
-            pre_start = max(0, i - sweep_window)
-            prior_sweep, _ = find_sweep(lows[pre_start:i], closes[pre_start:i], ob_low, "sellside")
-
-            if prior_sweep:
-                continue  # Liquidity was swept → regular sponsored OB, skip
-
-            is_mitigated = is_zone_mitigated(ob_high, ob_low, lows[i + 2:], "bullish")
-
-            blocks.append({
-                "type": "bullish",
-                "high": round(ob_high, 2),
-                "low": round(ob_low, 2),
-                "formed_ts": tss[i].isoformat(),
-                "is_mitigated": is_mitigated,
-                "age_bars": len(df) - 1 - i,
-                "note": "move initiated without prior sellside sweep",
-            })
-
-        # ── Bearish OB: bullish candle → bearish impulse ──
-        if is_bearish_ob(closes, opens, highs, lows, i, atr):
-            ob_high, ob_low = calc_ob_zone(highs, lows, i)
-
-            # Look for a buyside sweep in the window before the OB:
-            # A wick above ob_high that closes back below ob_high → buyside swept
-            pre_start = max(0, i - sweep_window)
-            prior_sweep, _ = find_sweep(highs[pre_start:i], closes[pre_start:i], ob_high, "buyside")
-
-            if prior_sweep:
-                continue  # Liquidity swept → regular sponsored OB, skip
-
-            is_mitigated = is_zone_mitigated(ob_high, ob_low, highs[i + 2:], "bearish")
-
-            blocks.append({
-                "type": "bearish",
-                "high": round(ob_high, 2),
-                "low": round(ob_low, 2),
-                "formed_ts": tss[i].isoformat(),
-                "is_mitigated": is_mitigated,
-                "age_bars": len(df) - 1 - i,
-                "note": "move initiated without prior buyside sweep",
-            })
+        blocks.append({
+            "type": c["type"],
+            "high": round(ob_h, 2),
+            "low": round(ob_l, 2),
+            "formed_ts": tss[ob_idx].isoformat(),
+            "is_mitigated": is_mit,
+            "age_bars": n - 1 - ob_idx,
+            "note": note,
+        })
 
     # Unmitigated first (still need to be revisited), then recency
     blocks.sort(key=lambda x: (x["is_mitigated"], x["age_bars"]))
     result = blocks[:max_results]
     return {"blocks": result, "count": len(result)}
+
+
+def _nearest_pool(swings: list[dict], ref_idx: int) -> dict | None:
+    """The most recent swing strictly before ``ref_idx`` (the nearest prior pool)."""
+    prior = [s for s in swings if s["idx"] < ref_idx]
+    return prior[-1] if prior else None

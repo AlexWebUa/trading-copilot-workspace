@@ -1,7 +1,7 @@
 """Probe batch 2: order_block, breaker, ifvg, rejection, VP, liquidity side-label, killzone."""
-import sys, warnings
+import os, sys, warnings
 warnings.filterwarnings("ignore")
-sys.path.insert(0, "/sessions/kind-admiring-hypatia/mnt/vibecoding/trading-copilot-workspace/trading-copilot")
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import numpy as np
 import pandas as pd
 

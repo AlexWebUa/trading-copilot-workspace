@@ -43,6 +43,10 @@ _QUARANTINED_TOOLS = {
     "detect_compression",
     "check_absorption_at_poi",
     "check_cd_divergence_at_structure",
+    # Quarantined indefinitely pending a manual redefinition by the trader —
+    # the rejection-block definition needs correcting (P2-1). Hidden from the LLM
+    # until then; the detector code is left untouched.
+    "detect_rejection_block",
 }
 
 

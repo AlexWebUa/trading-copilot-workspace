@@ -1,44 +1,39 @@
 """
 Sponsored Candle detector.
 
-A Sponsored Candle is an Order Block (OB) that was IMMEDIATELY PRECEDED by
-a confirmed liquidity sweep. The sequence:
+A Sponsored Candle is a (swing-break) Order Block that was IMMEDIATELY PRECEDED
+by a confirmed sweep of a *liquidity pool* — a prior swing extreme — not of the
+OB's own boundary (root causes R3 single-OB, R4 pool-anchored sweeps).
 
-  Sellside sweep (wick below prior low, close back above) → bearish OB candle → bullish impulse
-  Buyside  sweep (wick above prior high, close back below) → bullish OB candle → bearish impulse
+  Sellside pool (prior swing LOW) swept  → bullish OB → bullish impulse
+  Buyside  pool (prior swing HIGH) swept → bearish OB → bearish impulse
 
 Why it matters (per KB):
-  The sweep "sponsored" the institutional order — stops were taken, fuel was collected.
-  This is the highest-probability OB variant because institutions used the sweep
-  to accumulate/distribute before the impulse.
+  The sweep "sponsored" the institutional order — resting stops at the pool were
+  taken, fuel was collected, then price reversed into the OB and impulsed away.
+  This is the highest-probability OB variant.
 
 Detection:
-  1. Find OB patterns (opposing candle + impulse close) — same as detect_order_block.
-  2. In the `sweep_window` bars BEFORE the OB candle, look for a confirmed sweep:
-     - Bullish OB:  wick below OB low + close back above OB low (sellside swept)
-     - Bearish OB:  wick above OB high + close back below OB high (buyside swept)
-  3. Return sponsored OBs that are still unmitigated.
+  1. Find swing-break OBs via the shared scan (the single OB universe).
+  2. The pool = the nearest prior swing extreme before the OB candle (sellside
+     low for a bullish OB, buyside high for a bearish OB).
+  3. Sweep = within `sweep_window` bars up to the OB candle, a wick beyond the
+     pool that closes back on the safe side (find_sweep, side-typed).
+  4. Return sponsored OBs (unmitigated first).
 """
 
 import pandas as pd
 
-from copilot.detectors.utils import (
-    IMPULSE_ATR_THRESHOLD,
-    calc_atr,
-    calc_ob_zone,
-    extract_arrays,
-    find_sweep,
-    is_bearish_ob,
-    is_bullish_ob,
-    is_zone_mitigated,
-)
+from copilot.detectors.order_block import scan_order_blocks
+from copilot.detectors.utils import extract_arrays, find_sweep, is_zone_mitigated
 
 TOOL_SCHEMA = {
     "name": "detect_sponsored_candle",
     "description": (
-        "Find Sponsored Candles — Order Blocks immediately preceded by a confirmed liquidity sweep. "
-        "These are the highest-quality OBs: institutions swept stops then entered the impulse. "
-        "Use to identify setups where both a sweep AND an OB are present for maximum confluence."
+        "Find Sponsored Candles — Order Blocks immediately preceded by a confirmed sweep of a "
+        "liquidity pool (a prior swing high/low). These are the highest-quality OBs: institutions "
+        "swept stops at the pool then entered the impulse. "
+        "Use to identify setups where both a pool sweep AND an OB are present for maximum confluence."
     ),
     "input_schema": {
         "type": "object",
@@ -52,9 +47,10 @@ TOOL_SCHEMA = {
             "sweep_window": {
                 "type": "integer",
                 "default": 5,
-                "description": "Bars before OB to scan for the sponsoring sweep",
+                "description": "Bars up to the OB candle to scan for the sponsoring pool sweep",
             },
             "max_results": {"type": "integer", "default": 4},
+            "swing_lookback": {"type": "integer", "default": 5},
         },
         "required": ["symbol", "timeframe"],
     },
@@ -66,6 +62,7 @@ def detect_sponsored_candle(
     lookback: int = 100,
     sweep_window: int = 5,
     max_results: int = 4,
+    swing_lookback: int = 5,
 ) -> dict:
     if len(df) < 10:
         return {
@@ -76,64 +73,57 @@ def detect_sponsored_candle(
             "count": 0,
         }
 
-    atr = calc_atr(df)
-    opens, highs, lows, closes, tss = extract_arrays(df)
+    from copilot.detectors.market_structure import _find_raw_swings
+
+    _, highs, lows, closes, tss = extract_arrays(df)
+    n = len(df)
+    raw = _find_raw_swings(df, swing_lookback)
+    swing_lows = [s for s in raw if s["type"] == "low"]
+    swing_highs = [s for s in raw if s["type"] == "high"]
 
     sponsored: list[dict] = []
-    start_i = max(sweep_window + 1, len(df) - lookback - 1)
+    for c in scan_order_blocks(df, swing_lookback=swing_lookback, lookback=lookback):
+        ob_h, ob_l, ob_idx, brk = c["ob_high"], c["ob_low"], c["ob_idx"], c["break_idx"]
+        ws = max(0, ob_idx - sweep_window)
 
-    for i in range(start_i, len(df) - 2):
-        # ── Bullish OB: bearish candle → bullish impulse ──
-        if is_bullish_ob(closes, opens, highs, lows, i, atr):
-            ob_high, ob_low = calc_ob_zone(highs, lows, i)
-
-            # Check for sellside sweep before the OB:
-            # A bar where low < ob_low AND close > ob_low (wick below, closed back)
-            pre_start = max(0, i - sweep_window)
-            sweep_found, sweep_bar_offset = find_sweep(lows[pre_start:i], closes[pre_start:i], ob_low, "sellside")
-
-            if not sweep_found:
-                continue  # No sponsoring sweep → not a sponsored candle
-
-            is_mitigated = is_zone_mitigated(ob_high, ob_low, lows[i + 2:], "bullish")
-
-            sponsored.append({
-                "ob_type": "bullish",
-                "high": round(ob_high, 2),
-                "low": round(ob_low, 2),
-                "formed_ts": tss[i].isoformat(),
-                "sweep_ts": tss[pre_start + sweep_bar_offset].isoformat(),
-                "sweep_side": "sellside",
-                "is_mitigated": is_mitigated,
-                "age_bars": len(df) - 1 - i,
-            })
-
-        # ── Bearish OB: bullish candle → bearish impulse ──
-        if is_bearish_ob(closes, opens, highs, lows, i, atr):
-            ob_high, ob_low = calc_ob_zone(highs, lows, i)
-
-            # Check for buyside sweep before the OB:
-            # A bar where high > ob_high AND close < ob_high (wick above, closed back)
-            pre_start = max(0, i - sweep_window)
-            sweep_found, sweep_bar_offset = find_sweep(highs[pre_start:i], closes[pre_start:i], ob_high, "buyside")
-
-            if not sweep_found:
+        if c["type"] == "bullish":
+            pool = _nearest_pool(swing_lows, ob_idx)
+            if pool is None:
                 continue
+            found, rel = find_sweep(lows[ws:ob_idx + 1], closes[ws:ob_idx + 1], pool["price"], "sellside")
+            if not found:
+                continue
+            is_mit = is_zone_mitigated(ob_h, ob_l, lows[brk + 1:], "bullish")
+            sweep_side = "sellside"
+        else:
+            pool = _nearest_pool(swing_highs, ob_idx)
+            if pool is None:
+                continue
+            found, rel = find_sweep(highs[ws:ob_idx + 1], closes[ws:ob_idx + 1], pool["price"], "buyside")
+            if not found:
+                continue
+            is_mit = is_zone_mitigated(ob_h, ob_l, highs[brk + 1:], "bearish")
+            sweep_side = "buyside"
 
-            is_mitigated = is_zone_mitigated(ob_high, ob_low, highs[i + 2:], "bearish")
-
-            sponsored.append({
-                "ob_type": "bearish",
-                "high": round(ob_high, 2),
-                "low": round(ob_low, 2),
-                "formed_ts": tss[i].isoformat(),
-                "sweep_ts": tss[pre_start + sweep_bar_offset].isoformat(),
-                "sweep_side": "buyside",
-                "is_mitigated": is_mitigated,
-                "age_bars": len(df) - 1 - i,
-            })
+        sponsored.append({
+            "ob_type": c["type"],
+            "high": round(ob_h, 2),
+            "low": round(ob_l, 2),
+            "formed_ts": tss[ob_idx].isoformat(),
+            "sweep_ts": tss[ws + rel].isoformat(),
+            "sweep_side": sweep_side,
+            "pool_price": round(pool["price"], 2),
+            "is_mitigated": is_mit,
+            "age_bars": n - 1 - ob_idx,
+        })
 
     # Unmitigated first, then recency
     sponsored.sort(key=lambda x: (x["is_mitigated"], x["age_bars"]))
     result = sponsored[:max_results]
     return {"candles": result, "count": len(result)}
+
+
+def _nearest_pool(swings: list[dict], ref_idx: int) -> dict | None:
+    """The most recent swing strictly before ``ref_idx`` (the nearest prior pool)."""
+    prior = [s for s in swings if s["idx"] < ref_idx]
+    return prior[-1] if prior else None

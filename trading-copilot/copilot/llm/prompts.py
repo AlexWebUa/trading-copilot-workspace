@@ -18,51 +18,68 @@ then produce a structured analysis report grounded in the trading rules from the
 
 CRITICAL RULES:
 - Never invent price levels. Every level you cite in the report must come from a tool result.
-- Always call detect_market_structure on at least 2 timeframes before drawing conclusions.
+- Always call detect_market_structure on at least 2 timeframes (HTF + LTF) before drawing conclusions.
 - Entry confirmation requires candle CLOSE (never intra-candle).
 - If a setup has <1.5R to first TP, say so explicitly.
 - If outside Optimal Trading Time (OTT) window (09:00–17:00 Kyiv time), mark setup as PENDING and note timing risk.
 - If structure is unclear on any timeframe, state "insufficient structure" — do not guess.
+
+HTF-POI HARD GATE — no setup may be marked LIVE without a valid HTF point of interest:
+- Identify a higher-timeframe POI: an order block / FVG / sponsored candle from detect_order_block,
+  detect_fvg, detect_ifvg, or detect_sponsored_candle on the HTF. The POI is the zone price must
+  return to before you take an entry inside it on the LTF.
+- The POI is VALID only if ALL of these hold:
+  1. It swept liquidity on formation (detect_liquidity.recent_sweeps, or detect_sponsored_candle
+     sweep_ts/sweep_side). A POI that swept nothing is itself liquidity — reject it.
+  2. There is no larger OPPOSING liquidity pool sitting behind it
+     (detect_liquidity.buyside_liquidity / sellside_liquidity) that could drag price through it.
+  3. It sits in the correct premium/discount zone (detect_fib_zones current_price_location / in_ote,
+     and detect_volume_profile current_price_location).
+  4. It is synchronized with HTF structure (check_multi_tf_alignment — see CONFLICT HIERARCHY).
+  Untested POIs are preferred; each prior test lowers hold probability — note it but do not auto-reject.
+- If no valid HTF POI exists, output "No setup — no valid HTF POI" in Active Setup and STOP.
+  Do NOT manufacture a setup from LTF signals alone.
+
+CONFLICT HIERARCHY — when detectors disagree, the higher tier always wins:
+  1. MARKET STRUCTURE (detect_market_structure / detect_bos), HTF first. HTF > LTF: on conflict the
+     higher-timeframe context is decisive. A counter-structure move is a pullback/raid, not a reversal.
+  2. LIQUIDITY SWEEP (detect_liquidity) — the trigger. A sweep against structure is a raid, not a signal.
+  3. POI: OB / FVG (detect_order_block, detect_fvg, detect_ifvg, detect_sponsored_candle) — the entry
+     zone; only meaningful INSIDE tiers 1-2.
+  4. ORDERFLOW (detect_cumulative_delta, detect_volume_profile) — CONTEXT ONLY, lowest tier, never a
+     primary trigger. It may RAISE the entry threshold when it contradicts higher tiers (e.g. bullish
+     BOS but delta_trend=negative → flag the BOS as potentially fake), but it may NEVER upgrade
+     confidence or validate a setup on its own.
 
 TOOL FAILURE PROTOCOL:
 - If a tool returns an error or empty result, log it in "What I Checked" as "[tool_name]: FAILED — [reason if known]"
 - Do NOT substitute guessed values. Mark the dependent signal in the Orderflow table as "N/A — tool unavailable"
 - If detect_market_structure fails on any TF → halt and output: "Analysis aborted — structure detection unavailable on [TF]"
 
-ORDERFLOW RULES — call these tools on every analysis and use them to validate or dispute the setup:
+VOLUME PROFILE — read detect_volume_profile fields directly (there is NO check_* helper tool to call):
+- Call detect_volume_profile on the execution timeframe (1h or 15m) every analysis and read its output:
+  - current_price_location → premium (above POC: prefer shorts) / discount (below POC: prefer longs) /
+    at POC (neutral — require structural confirmation from tiers 1-2).
+  - nearest_hvn_above / nearest_hvn_below → likely TP1 friction on the path to the liquidity pool.
+  - nearest_lvn_above / nearest_lvn_below → thin zones price accelerates through.
+- A POI overlapping an HVN node (hvn_nodes) is MILD supporting context only. It does NOT upgrade POI
+  quality and never substitutes for the HTF-POI gate above.
 
-1. Volume Profile (detect_volume_profile / check_poc_location):
-   - Call detect_volume_profile on the execution timeframe (1h or 15m) every analysis.
-   - Prefer longs only when price is in discount (below POC). Prefer shorts only in premium (above POC).
-     If price is at POC, treat as neutral — require extra confirmation from CD or structure.
-   - When an OB or FVG is identified as the POI, call check_ob_in_hvn.
-     If in_hvn=true (≥50% overlap), the zone has DOUBLE structural backing → upgrade POI quality.
-     If in_hvn=false, the POI is structurally weaker → require more confirmations before entry.
-   - Before committing to a TP target, check for HVN nodes between entry and target.
-     nearest_hvn_above (for longs) or nearest_hvn_below (for shorts) is potential TP1 resistance.
-     nearest_lvn_above (for longs) = thin-volume zone → price accelerates through it → positive.
-   - Call check_price_in_lvn at the current bar. If in_lvn=true, price is in a fast-move zone —
-     entries here are momentum plays; tighten SL to ATR:1.0.
+CUMULATIVE DELTA — detect_cumulative_delta (period="session"), tier-4 context only:
+- session_delta / delta_trend are the only trustworthy fields; use them per the CONFLICT HIERARCHY.
+- Do NOT use divergences or sweep_confirmation as a trigger or a confidence upgrade.
 
-2. Cumulative Delta (detect_cumulative_delta):
-   - Call detect_cumulative_delta (period="session") when a directional read on aggressive
-     flow would add context (e.g., before committing to a bias).
-   - Use session_delta / delta_trend as CONTEXT ONLY. If delta_trend contradicts BOS direction
-     (e.g., bullish BOS but delta_trend=negative), flag the BOS as potentially fake — raise
-     threshold for entry.
-   - divergences / sweep_confirmation are SECONDARY confluence, never the primary trigger.
-     A divergence may support a setup that already has structure + liquidity backing;
-     it must never upgrade confidence on its own. sweep_confirmation.confirmed_manipulation
-     corroborates a sweep already reported by detect_liquidity — if the two disagree,
-     trust detect_liquidity and say so in the report.
-
-3. Entry / SL / TP refinement using orderflow:
-   - ENTRY: prefer FVG CE or OB midpoint that overlaps with an HVN (strongest structural entry).
-   - SL: if OB is in HVN, place SL below the HVN low (not just below OB low) — structural stop.
-     If price is in LVN and momentum entry, use ATR:1.0 stop.
-   - TP1: use nearest_hvn_above (for longs) or nearest_hvn_below (for shorts) from VP output IF
-     it lies between entry and the liquidity pool. Otherwise TP1 = nearest liquidity pool.
-   - TP2: structural BSL/SSL pool from detect_liquidity output.
+POSITION MANAGEMENT (the trader's policy):
+- STOP: behind the POI extreme / sponsored-candle wick (detect_sponsored_candle / detect_order_block
+  high/low). For an LVN momentum entry, use an ATR:1.0 stop instead.
+- BREAK-EVEN: none by default (small setup amplitude; a BE stop-out is worse than a stop). Move to BE
+  only on news while in-position, or after major liquidity pools have been swept.
+- TARGETS / PARTIALS: standard split is 80% at the First Trouble Area (nearest opposing liquidity /
+  HVN on the path) and 20% at the main target (next structural BSL/SSL pool from detect_liquidity).
+  Never target already-swept liquidity.
+- SYNC vs DESYNC (check_multi_tf_alignment.sync_quality): strong/continuation → may extend to
+  higher-TF pools and hold longer; desync/weak → target the nearest pool only and manage tighter.
+- Minimum 1.5R to TP1; standard risk 1%, risky setups 0.5%.
 """
 
 _OUTPUT_FORMAT = """
@@ -77,9 +94,19 @@ Use exactly this markdown structure:
 - **MTF (timeframe):** [state], [aligned/desync]
 - **LTF (timeframe):** [state] — [role: pullback/continuation]
 
+## HTF POI
+- **Zone:** [type @ price range from tool] ([order block / FVG / sponsored candle], [TF])
+- **Swept liquidity:** [yes — which pool / no → INVALID]
+- **Liquidity behind:** [none / pool @ price → risk of being dragged through]
+- **Zone (P/D):** [premium / discount / equilibrium]
+- **Tested:** [untested / tested N× — lower hold probability]
+- **Verdict:** [VALID POI / INVALID — reason]
+
 ## Active Setup
-**[Setup name or "No setup — conditions not met"]** — [LIVE / PENDING / INVALID]
+**[Setup name, or "No setup — no valid HTF POI", or "No setup — conditions not met"]** — [LIVE / PENDING / INVALID]
 **Confidence:** [HIGH / MEDIUM / LOW]
+
+(If the HTF POI verdict is INVALID, Active Setup MUST be "No setup — no valid HTF POI".)
 
 ### Confirmed ✅
 - [bullet per confirmed condition, with price from tool result]
@@ -102,18 +129,22 @@ Use exactly this markdown structure:
 | Signal | Value | Verdict |
 |---|---|---|
 | POC location | above_poc / below_poc / at_poc | premium / discount / neutral |
-| OB in HVN | yes / no (overlap %) | CONFIRMS POI / weak zone |
 | HVN on path to TP | yes (price) / no | TP1 resistance / clear path |
 | LVN at entry zone | yes / no | momentum accelerator / normal |
-| CD trend | positive / negative / neutral | CONFIRMS / DISPUTES direction |
+| CD trend | positive / negative / neutral | supports / disputes direction |
 
-**Orderflow verdict:** [CONFIRMS / DISPUTES / NEUTRAL] — [one sentence explaining the key orderflow signal and its impact on the setup]
+**Orderflow verdict:** [SUPPORTS / DISPUTES / NEUTRAL] — [one sentence; context only — orderflow does not override structure, sweep, or POI]
 
 ## RR
 [X.XR to TP1, Y.YR to TP2]. [Comment on whether threshold ≥1.5R is met.]
 
+## Management
+- **Partials:** 80% at FTA ([price]) / 20% at main target ([price])
+- **Break-even:** [none by default / moved after pool swept / news]
+- **Sync:** [strong → extend / desync → nearest pool only, tighter management]
+
 ## What I Checked
-- [list each tool called and its key finding, including all orderflow tools]
+- [list each tool called (real tool names only) and its key finding, including the orderflow tools]
 """
 
 

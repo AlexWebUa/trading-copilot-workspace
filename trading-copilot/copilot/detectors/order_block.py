@@ -109,105 +109,123 @@ def detect_order_block(
             "count": 0,
         }
 
-    # ── Import swing helpers (internal, not detectors) ────────────────────────
-    from copilot.detectors.market_structure import _find_raw_swings
-
     opens, highs, lows, closes, tss = extract_arrays(df)
     atr           = calc_atr(df)
     n             = len(df)
     current_price = float(closes[-1])
 
-    # Confirmed RAW swings, consumed chronologically — NO deduplication.
-    # P0-3 / root cause R1: alternation-dedup merges consecutive same-type
-    # swings and can erase the very swing whose break defines the OB (e.g.
-    # price breaks a swing high before a pullback low confirms — the broken
-    # high would be deleted in favor of the newer, higher one). Verified
-    # empirically that smc.ob inherits this flaw, so the swing-break scan
-    # below runs on raw confirmed swings instead.
-    raw_swings   = _find_raw_swings(df, swing_lookback)
-    swing_highs  = [s for s in raw_swings if s["type"] == "high"]   # sorted by idx asc
-    swing_lows   = [s for s in raw_swings if s["type"] == "low"]
-
-    scan_start    = max(0, n - lookback)
     obs: list[dict] = []
-    crossed_high: set[int] = set()   # swing-high indices already used as OB triggers
-    crossed_low:  set[int] = set()
+    for c in scan_order_blocks(df, swing_lookback=swing_lookback, lookback=lookback):
+        ob_idx, brk = c["ob_idx"], c["break_idx"]
+        ob_h, ob_l = c["ob_high"], c["ob_low"]
+        if c["type"] == "bullish":
+            # Mitigation: check lows AFTER the breakout bar (price "returning")
+            is_mit = is_zone_mitigated(ob_h, ob_l, lows[brk + 1:], "bullish")
+            dist   = round(abs(current_price - ob_l) / atr, 2) if atr else 0
+        else:
+            # Mitigation: check highs AFTER the breakout bar
+            is_mit = is_zone_mitigated(ob_h, ob_l, highs[brk + 1:], "bearish")
+            dist   = round(abs(current_price - ob_h) / atr, 2) if atr else 0
+        obs.append({
+            "type":          c["type"],
+            "high":          round(ob_h, 2),
+            "low":           round(ob_l, 2),
+            "formed_ts":     tss[ob_idx].isoformat(),
+            "has_fvg_after": _check_fvg_after(df, ob_idx + 1, c["type"]),
+            "is_mitigated":  is_mit,
+            "distance_atr":  dist,
+            "age_bars":      n - 1 - ob_idx,
+        })
 
-    # Pointer into each sorted swing list: first position with idx >= current bar i.
-    # Advancing before the scan_start skip keeps pointers in sync for later bars.
-    h_ptr = 0
-    l_ptr = 0
+    # Sort: unmitigated first, then nearest (smallest age)
+    obs.sort(key=lambda x: (x["is_mitigated"], x["age_bars"]))
+    trimmed = obs[:max_results]
+    return {"obs": trimmed, "count": len(trimmed)}
+
+
+def scan_order_blocks(
+    df: pd.DataFrame,
+    swing_lookback: int = 5,
+    lookback: int | None = None,
+) -> list[dict]:
+    """
+    Shared swing-break Order Block scan — the single OB definition (root cause R3).
+
+    Returns OB candidates in detection order (by break bar), each a dict:
+        {type, ob_idx, ob_high, ob_low, break_idx, swing_idx, swing_price}
+
+    This is the structural OB used by `detect_order_block` and all its consumers
+    (breaker / mitigation / sponsored) so the chart has ONE OB universe.
+
+    Confirmed RAW swings are consumed chronologically — NO deduplication. P0-3 /
+    root cause R1: alternation-dedup merges consecutive same-type swings and can
+    erase the very swing whose break defines the OB. `smc.ob` inherits this flaw,
+    so the scan runs on raw confirmed swings.
+
+    `lookback` bounds the breakout bar to the last `lookback` bars (the OB candle
+    and swing may be older); ``None`` scans the whole frame.
+    """
+    from copilot.detectors.market_structure import _find_raw_swings
+
+    _, highs, lows, closes, _ = extract_arrays(df)
+    n = len(df)
+
+    raw_swings  = _find_raw_swings(df, swing_lookback)
+    swing_highs = [s for s in raw_swings if s["type"] == "high"]   # sorted by idx asc
+    swing_lows  = [s for s in raw_swings if s["type"] == "low"]
+
+    scan_start = 0 if lookback is None else max(0, n - lookback)
+    candidates: list[dict] = []
+    crossed_high: set[int] = set()
+    crossed_low:  set[int] = set()
+    h_ptr = l_ptr = 0
 
     for i in range(n):
-        # ── Advance pointers past swings that occurred before bar i ─────────
         while h_ptr < len(swing_highs) and swing_highs[h_ptr]["idx"] < i:
             h_ptr += 1
         while l_ptr < len(swing_lows) and swing_lows[l_ptr]["idx"] < i:
             l_ptr += 1
 
         if i < scan_start:
-            continue   # outside lookback window — pointers are still maintained above
+            continue
 
-        # ── Bullish OB trigger: close breaks above most-recent uncrossed swing HIGH ──
+        # Bullish OB: close breaks above the most-recent uncrossed swing HIGH.
         if h_ptr > 0:
-            sh = swing_highs[h_ptr - 1]   # most recent swing high before bar i
+            sh = swing_highs[h_ptr - 1]
             if sh["idx"] not in crossed_high and closes[i] > sh["price"]:
                 crossed_high.add(sh["idx"])
-
-                # OB candle = lowest-low bar in window (sh+1 .. i-1)
-                win_s = sh["idx"] + 1
-                win_e = i          # exclusive — don't include the breakout bar itself
+                win_s, win_e = sh["idx"] + 1, i  # exclusive of the breakout bar
                 if win_e > win_s:
                     seg    = lows[win_s:win_e]
                     ob_idx = win_s + int(np.where(seg == seg.min())[0][-1])
                 else:
                     ob_idx = max(0, i - 1)
-
                 ob_h, ob_l = calc_ob_zone(highs, lows, ob_idx)
-                obs.append({
-                    "type":          "bullish",
-                    "high":          round(ob_h, 2),
-                    "low":           round(ob_l, 2),
-                    "formed_ts":     tss[ob_idx].isoformat(),
-                    "has_fvg_after": _check_fvg_after(df, ob_idx + 1, "bullish"),
-                    # Mitigation: check lows AFTER the breakout bar (price "returning")
-                    "is_mitigated":  is_zone_mitigated(ob_h, ob_l, lows[i + 1:], "bullish"),
-                    "distance_atr":  round(abs(current_price - ob_l) / atr, 2) if atr else 0,
-                    "age_bars":      n - 1 - ob_idx,
+                candidates.append({
+                    "type": "bullish", "ob_idx": ob_idx,
+                    "ob_high": ob_h, "ob_low": ob_l,
+                    "break_idx": i, "swing_idx": sh["idx"], "swing_price": sh["price"],
                 })
 
-        # ── Bearish OB trigger: close breaks below most-recent uncrossed swing LOW ──
+        # Bearish OB: close breaks below the most-recent uncrossed swing LOW.
         if l_ptr > 0:
-            sl = swing_lows[l_ptr - 1]    # most recent swing low before bar i
+            sl = swing_lows[l_ptr - 1]
             if sl["idx"] not in crossed_low and closes[i] < sl["price"]:
                 crossed_low.add(sl["idx"])
-
-                # OB candle = highest-high bar in window (sl+1 .. i-1)
-                win_s = sl["idx"] + 1
-                win_e = i
+                win_s, win_e = sl["idx"] + 1, i
                 if win_e > win_s:
                     seg    = highs[win_s:win_e]
                     ob_idx = win_s + int(np.where(seg == seg.max())[0][-1])
                 else:
                     ob_idx = max(0, i - 1)
-
                 ob_h, ob_l = calc_ob_zone(highs, lows, ob_idx)
-                obs.append({
-                    "type":          "bearish",
-                    "high":          round(ob_h, 2),
-                    "low":           round(ob_l, 2),
-                    "formed_ts":     tss[ob_idx].isoformat(),
-                    "has_fvg_after": _check_fvg_after(df, ob_idx + 1, "bearish"),
-                    # Mitigation: check highs AFTER the breakout bar
-                    "is_mitigated":  is_zone_mitigated(ob_h, ob_l, highs[i + 1:], "bearish"),
-                    "distance_atr":  round(abs(current_price - ob_h) / atr, 2) if atr else 0,
-                    "age_bars":      n - 1 - ob_idx,
+                candidates.append({
+                    "type": "bearish", "ob_idx": ob_idx,
+                    "ob_high": ob_h, "ob_low": ob_l,
+                    "break_idx": i, "swing_idx": sl["idx"], "swing_price": sl["price"],
                 })
 
-    # Sort: unmitigated first, then nearest (smallest age)
-    obs.sort(key=lambda x: (x["is_mitigated"], x["age_bars"]))
-    trimmed = obs[:max_results]
-    return {"obs": trimmed, "count": len(trimmed)}
+    return candidates
 
 
 def _check_fvg_after(df: pd.DataFrame, start_idx: int, ob_type: str) -> bool:

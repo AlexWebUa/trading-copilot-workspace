@@ -16,15 +16,11 @@ Per KB: Breaker Blocks are higher-probability than plain OBs because they
 represent confirmed institutional failure — the zone has been tested and rejected once.
 """
 
+import numpy as np
 import pandas as pd
 
-from copilot.detectors.utils import (
-    calc_atr,
-    calc_ob_zone,
-    extract_arrays,
-    is_bearish_ob,
-    is_bullish_ob,
-)
+from copilot.detectors.utils import extract_arrays
+from copilot.detectors.order_block import scan_order_blocks
 
 TOOL_SCHEMA = {
     "name": "detect_breaker_block",
@@ -44,6 +40,7 @@ TOOL_SCHEMA = {
             },
             "lookback": {"type": "integer", "default": 120},
             "max_results": {"type": "integer", "default": 6},
+            "swing_lookback": {"type": "integer", "default": 5},
         },
         "required": ["symbol", "timeframe"],
     },
@@ -54,6 +51,7 @@ def detect_breaker_block(
     df: pd.DataFrame,
     lookback: int = 120,
     max_results: int = 6,
+    swing_lookback: int = 5,
 ) -> dict:
     if len(df) < 10:
         return {
@@ -64,82 +62,59 @@ def detect_breaker_block(
             "count": 0,
         }
 
-    atr = calc_atr(df)
-    opens, highs, lows, closes, tss = extract_arrays(df)
+    _, highs, lows, closes, tss = extract_arrays(df)
+    n = len(df)
 
+    # Single OB universe (R3). A breaker is a swing-break OB later fully pierced —
+    # confirmed by a CLOSE through the opposite boundary, FVG or not (P2-2).
     breakers: list[dict] = []
-    start_i = max(1, len(df) - lookback - 1)
+    for c in scan_order_blocks(df, swing_lookback=swing_lookback, lookback=lookback):
+        ob_high, ob_low, ob_idx, brk = c["ob_high"], c["ob_low"], c["ob_idx"], c["break_idx"]
+        fut_closes = closes[brk + 1:]
 
-    for i in range(start_i, len(df) - 2):
-        # ── Bullish OB: bearish candle → bullish impulse ──
-        if is_bullish_ob(closes, opens, highs, lows, i, atr):
-            ob_high, ob_low = calc_ob_zone(highs, lows, i)
-
-            # Pierce confirmed by a bearish FVG (3-candle pattern) that closes below ob_low.
-            # Triple (j, j+1, j+2): highs[j+2] < lows[j]  AND  highs[j+2] < ob_low
-            fut_highs = highs[i + 2:]
-            fut_lows = lows[i + 2:]
-            fut_closes = closes[i + 2:]
-
-            first_pierce = -1
-            for j in range(len(fut_highs) - 2):
-                if fut_highs[j + 2] < fut_lows[j] and fut_highs[j + 2] < ob_low:
-                    first_pierce = j + 2
-                    break
-
-            if first_pierce >= 0:
-                after_closes = fut_closes[first_pierce + 1:]
-                after_highs = fut_highs[first_pierce + 1:]
-
-                # Still active as bearish breaker if not re-pierced upward (close above ob_high)
-                exhausted = len(after_closes) > 0 and bool((after_closes > ob_high).any())
-                is_tested = len(after_highs) > 0 and bool((after_highs >= ob_low).any())
-
-                if not exhausted:
-                    breakers.append({
-                        "type": "bearish",  # now acts as resistance
-                        "high": round(ob_high, 2),
-                        "low": round(ob_low, 2),
-                        "formed_ts": tss[i].isoformat(),
-                        "is_tested": is_tested,
-                        "age_bars": len(df) - 1 - i,
-                        "original_ob_type": "bullish",
-                    })
-
-        # ── Bearish OB: bullish candle → bearish impulse ──
-        if is_bearish_ob(closes, opens, highs, lows, i, atr):
-            ob_high, ob_low = calc_ob_zone(highs, lows, i)
-
-            # Pierce confirmed by a bullish FVG (3-candle pattern) that closes above ob_high.
-            # Triple (j, j+1, j+2): lows[j+2] > highs[j]  AND  lows[j+2] > ob_high
-            fut_highs = highs[i + 2:]
-            fut_lows = lows[i + 2:]
-            fut_closes = closes[i + 2:]
-
-            first_pierce = -1
-            for j in range(len(fut_lows) - 2):
-                if fut_lows[j + 2] > fut_highs[j] and fut_lows[j + 2] > ob_high:
-                    first_pierce = j + 2
-                    break
-
-            if first_pierce >= 0:
-                after_closes = fut_closes[first_pierce + 1:]
-                after_lows = fut_lows[first_pierce + 1:]
-
-                # Still active as bullish breaker if not re-pierced downward (close below ob_low)
-                exhausted = len(after_closes) > 0 and bool((after_closes < ob_low).any())
-                is_tested = len(after_lows) > 0 and bool((after_lows <= ob_high).any())
-
-                if not exhausted:
-                    breakers.append({
-                        "type": "bullish",  # now acts as support
-                        "high": round(ob_high, 2),
-                        "low": round(ob_low, 2),
-                        "formed_ts": tss[i].isoformat(),
-                        "is_tested": is_tested,
-                        "age_bars": len(df) - 1 - i,
-                        "original_ob_type": "bearish",
-                    })
+        if c["type"] == "bullish":
+            # Pierce = a later close BELOW the OB low → bearish breaker (resistance).
+            rel = np.where(fut_closes < ob_low)[0]
+            if len(rel) == 0:
+                continue
+            pierce_idx = brk + 1 + int(rel[0])
+            after_closes = closes[pierce_idx + 1:]
+            after_highs = highs[pierce_idx + 1:]
+            # Exhausted if price later closes back above the OB high.
+            if len(after_closes) and bool((after_closes > ob_high).any()):
+                continue
+            is_tested = len(after_highs) > 0 and bool((after_highs >= ob_low).any())
+            breakers.append({
+                "type": "bearish",            # now acts as resistance
+                "high": round(ob_high, 2),
+                "low": round(ob_low, 2),
+                "formed_ts": tss[ob_idx].isoformat(),
+                "pierce_ts": tss[pierce_idx].isoformat(),
+                "is_tested": is_tested,
+                "age_bars": n - 1 - ob_idx,
+                "original_ob_type": "bullish",
+            })
+        else:
+            # Pierce = a later close ABOVE the OB high → bullish breaker (support).
+            rel = np.where(fut_closes > ob_high)[0]
+            if len(rel) == 0:
+                continue
+            pierce_idx = brk + 1 + int(rel[0])
+            after_closes = closes[pierce_idx + 1:]
+            after_lows = lows[pierce_idx + 1:]
+            if len(after_closes) and bool((after_closes < ob_low).any()):
+                continue
+            is_tested = len(after_lows) > 0 and bool((after_lows <= ob_high).any())
+            breakers.append({
+                "type": "bullish",            # now acts as support
+                "high": round(ob_high, 2),
+                "low": round(ob_low, 2),
+                "formed_ts": tss[ob_idx].isoformat(),
+                "pierce_ts": tss[pierce_idx].isoformat(),
+                "is_tested": is_tested,
+                "age_bars": n - 1 - ob_idx,
+                "original_ob_type": "bearish",
+            })
 
     # Tested breakers first (more relevant), then recency
     breakers.sort(key=lambda x: (not x["is_tested"], x["age_bars"]))

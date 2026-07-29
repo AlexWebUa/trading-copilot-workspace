@@ -124,7 +124,9 @@ def build_context_block(prev_state: dict, curr_results: dict[str, Any]) -> str:
         curr_poc = curr.get("poc")
         prev_poc = prev_r.get("poc")
         if curr_poc and prev_poc and abs(curr_poc - prev_poc) / prev_poc > 0.005:
-            tf_label = key.replace("detect_volume_profile_", "")
+            # Keys are "detect_volume_profile@SYMBOL@TF" (see agent._result_key);
+            # the timeframe is the last @-segment.
+            tf_label = key.split("@")[-1] if "@" in key else key.replace("detect_volume_profile_", "")
             poc_shifts.append(f"  POC {tf_label}: {prev_poc} → {curr_poc}")
 
     if poc_shifts:
@@ -144,6 +146,30 @@ def build_context_block(prev_state: dict, curr_results: dict[str, Any]) -> str:
             lines.append(f"Structure shift: {bos_type} {prev_dir} → {curr_dir}")
             lines.append("")
 
+    # HTF-POI lifecycle: OB mitigation, breaker tested, sponsored-candle mitigated.
+    # Each tracks a False → True flip of a boolean flag on a zone keyed by type/high/low.
+    poi_changes: list[str] = []
+    for items_field, flag, label in (
+        ("obs", "is_mitigated", "OB"),
+        ("breakers", "is_tested", "Breaker"),
+        ("candles", "is_mitigated", "SC"),
+    ):
+        for key, curr in curr_results.items():
+            if not isinstance(curr, dict):
+                continue
+            prev_r = prev.get(key, {})
+            curr_flags = {_zone_id(z): z.get(flag, False) for z in curr.get(items_field, [])}
+            prev_flags = {_zone_id(z): z.get(flag, False) for z in prev_r.get(items_field, [])}
+            for zid, now in curr_flags.items():
+                if now and prev_flags.get(zid) is False:
+                    verb = "tested" if flag == "is_tested" else "mitigated"
+                    poi_changes.append(f"  {label} {zid}: {verb} ✓")
+
+    if poi_changes:
+        lines.append("HTF POI changes since last analysis:")
+        lines += poi_changes
+        lines.append("")
+
     if len(lines) <= 2:
         return ""  # nothing meaningful to report
 
@@ -152,3 +178,7 @@ def build_context_block(prev_state: dict, curr_results: dict[str, Any]) -> str:
 
 def _fvg_id(z: dict) -> str:
     return f"{z.get('type', '?')}_{z.get('upper', 0)}_{z.get('lower', 0)}"
+
+
+def _zone_id(z: dict) -> str:
+    return f"{z.get('type', '?')}_{z.get('high', 0)}_{z.get('low', 0)}"

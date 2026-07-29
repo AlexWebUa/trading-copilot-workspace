@@ -290,11 +290,11 @@ def _sl_from_swing(
         # detect_fractals returns recent fractals sorted newest-first
         fractals = fractal_result.get("fractals", [])
         for f in fractals:
-            if direction == "long" and f.get("type") == "low" and not f.get("is_swept", False):
+            if direction == "long" and f.get("type") == "swing_low" and not f.get("is_swept", False):
                 price = f.get("price")
                 if price and price < entry_price:
                     return float(price) - buffer
-            if direction == "short" and f.get("type") == "high" and not f.get("is_swept", False):
+            if direction == "short" and f.get("type") == "swing_high" and not f.get("is_swept", False):
                 price = f.get("price")
                 if price and price > entry_price:
                     return float(price) + buffer

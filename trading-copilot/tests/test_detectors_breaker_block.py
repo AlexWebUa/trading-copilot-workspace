@@ -91,6 +91,15 @@ def _make_no_pierce_fixture() -> pd.DataFrame:
     return _make_df(rows)
 
 
+# P2-2 (DETECTOR_REVIEW_2026-06-10.md): detect_breaker_block "Misses class —
+# demands an FVG as pierce evidence; plain close-through never flips to breaker."
+# These fixtures pierce the OB with overlapping closes (no FVG), so the detector
+# misses them. xfail(strict) until the breaker rewrite lands — then they XPASS and
+# force removal of the marker. Mirrors test_breaker_block_close_through_without_fvg
+# in test_probe_regression.py.
+_BREAKER_P2_2 = "P2-2: breaker_block requires an FVG to register a close-through pierce"
+
+
 class TestDetectBreakerBlock:
     def test_bearish_breaker_detected(self):
         df = _make_bearish_breaker_fixture()

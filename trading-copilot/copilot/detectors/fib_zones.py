@@ -36,6 +36,17 @@ TOOL_SCHEMA = {
                 "type": "number",
                 "description": "The low of the reference swing",
             },
+            "direction": {
+                "type": "string",
+                "enum": ["auto", "long", "short"],
+                "default": "auto",
+                "description": (
+                    "Trade direction the swing is measured for. 'long' = OTE is the "
+                    "0.618–0.786 retracement DOWN from the swing high (discount entry); "
+                    "'short' = the 0.618–0.786 retracement UP from the swing low (premium "
+                    "entry). 'auto' infers it from the leg in the data."
+                ),
+            },
         },
         "required": ["symbol", "timeframe", "swing_high", "swing_low"],
     },
@@ -46,6 +57,7 @@ def detect_fib_zones(
     df: pd.DataFrame,
     swing_high: float,
     swing_low: float,
+    direction: str = "auto",
 ) -> dict:
     if swing_high <= swing_low:
         return {"status": "invalid_swing", "reason": "swing_high must be > swing_low"}
@@ -53,6 +65,10 @@ def detect_fib_zones(
     rng = swing_high - swing_low
     current_price = round(float(df["close"].iloc[-1]), 2)
 
+    if direction == "auto":
+        direction = _infer_direction(df)
+
+    # Standard fib ladder measured DOWN from the swing high (retracement %).
     def fib(ratio: float) -> float:
         return round(swing_high - ratio * rng, 2)
 
@@ -76,22 +92,46 @@ def detect_fib_zones(
     else:
         price_location = "equilibrium"
 
+    # OTE band is direction-dependent. For a long (up-leg) we want the discount
+    # retracement down from the high; for a short (down-leg) the premium
+    # retracement up from the low. Bounds reported low→high regardless.
+    if direction == "short":
+        ote = {
+            "lower": round(swing_low + 0.618 * rng, 2),
+            "upper": round(swing_low + 0.786 * rng, 2),
+            "midpoint": round(swing_low + 0.705 * rng, 2),
+        }
+    else:  # long
+        ote = {
+            "lower": levels["0.786"],
+            "upper": levels["0.618"],
+            "midpoint": levels["0.705"],
+        }
+
     fib_ratio = (swing_high - current_price) / rng if rng else 0
 
     return {
+        "direction": direction,
         "swing_high": round(swing_high, 2),
         "swing_low": round(swing_low, 2),
         "equilibrium": equilibrium,
         "premium_zone": {"upper": round(swing_high, 2), "lower": equilibrium},
         "discount_zone": {"upper": equilibrium, "lower": round(swing_low, 2)},
-        "ote": {
-            "upper": levels["0.618"],
-            "lower": levels["0.786"],
-            "midpoint": levels["0.705"],
-        },
+        "ote": ote,
         "current_price": current_price,
         "current_fib_ratio": round(fib_ratio, 3),
         "current_price_location": price_location,
-        "in_ote": levels["0.786"] <= current_price <= levels["0.618"],
+        "in_ote": ote["lower"] <= current_price <= ote["upper"],
         "key_levels": levels,
     }
+
+
+def _infer_direction(df: pd.DataFrame) -> str:
+    """Infer the leg direction from the data: if the high prints before the low
+    the market was falling (short setup, retrace up); otherwise it was rising
+    (long setup, retrace down). Ties default to long."""
+    highs = df["high"].values
+    lows = df["low"].values
+    if len(highs) == 0:
+        return "long"
+    return "short" if int(highs.argmax()) < int(lows.argmin()) else "long"

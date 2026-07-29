@@ -1,12 +1,9 @@
 {
   "mcpServers": {
     "trading-copilot": {
-      "command": "python",
+      "command": "/home/alex/vibecoding/trading-copilot-workspace/trading-copilot/.venv/bin/python",
       "args": ["-m", "copilot.mcp_server"],
-      "cwd": "D:\\Projects\\vibecoding\\trading-copilot-workspace\\trading-copilot",
-      "env": {
-        "PYTHONPATH": "D:\\Projects\\vibecoding\\trading-copilot-workspace\\trading-copilot\\.venv_mcp;D:\\Projects\\vibecoding\\trading-copilot-workspace\\trading-copilot"
-      }
+      "cwd": "/home/alex/vibecoding/trading-copilot-workspace/trading-copilot"
     }
   }
 }

@@ -44,27 +44,33 @@ def current_killzone(dt: datetime | None = None) -> dict:
     """Return info about the current session/killzone state."""
     dt = (dt or now_kyiv()).astimezone(_KYIV_TZ)
     local = dt.time().replace(tzinfo=None)
+    is_weekend = dt.weekday() >= 5  # Saturday=5, Sunday=6 — markets effectively closed
 
     active_kz = None
-    for start, end, name in _KILLZONES:
-        if start <= local < end:
-            active_kz = name
-            break
+    if not is_weekend:
+        for start, end, name in _KILLZONES:
+            if start <= local < end:
+                active_kz = name
+                break
 
-    in_ott = _OTT_START <= local < _OTT_END
+    in_ott = (not is_weekend) and (_OTT_START <= local < _OTT_END)
 
     return {
         "kyiv_time": dt.strftime("%H:%M"),
         "weekday": dt.strftime("%A"),
         "in_ott_window": in_ott,
         "active_killzone": active_kz,
-        "next_killzone": _next_killzone(local),
+        "next_killzone": _next_killzone(local, dt.weekday()),
         "is_friday": dt.weekday() == 4,
     }
 
 
-def _next_killzone(local: time) -> str | None:
-    for start, _, name in _KILLZONES:
-        if local < start:
-            return f"{name} @ {start.strftime('%H:%M')} Kyiv"
-    return None
+def _next_killzone(local: time, weekday: int) -> str | None:
+    """Next upcoming killzone. On weekends (or after the last KZ on a weekday),
+    the next one is Monday's first window."""
+    if weekday < 5:
+        for start, _, name in _KILLZONES:
+            if local < start:
+                return f"{name} @ {start.strftime('%H:%M')} Kyiv"
+    first_start, _, first_name = _KILLZONES[0]
+    return f"{first_name} @ {first_start.strftime('%H:%M')} Kyiv (Mon)"

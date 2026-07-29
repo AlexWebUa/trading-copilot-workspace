@@ -36,15 +36,17 @@ institutional intent.  Used identically by:
 
 def calc_atr(df: pd.DataFrame, period: int = 14) -> float:
     """
-    Return the ATR approximation as the rolling mean of (high − low).
+    Return the unified true-range ATR at the most recent bar.
 
-    Uses the high-low range as a simplified ATR proxy (no gap adjustment needed
-    for the detectors in this package).  Returns the value at the last bar.
+    Delegates to ``smc_lib.true_range_atr`` — the single ATR definition used
+    across the package (true range = max of high−low, |high−prev_close|,
+    |low−prev_close|), not the old high-low proxy.  Returns the last-bar scalar;
+    use ``true_range_atr`` directly when a per-bar array is needed inside a loop.
 
     Parameters
     ----------
     df : pd.DataFrame
-        Canonical OHLCV DataFrame with ``'high'`` and ``'low'`` columns.
+        Canonical OHLCV DataFrame.
     period : int
         Rolling window length.  Default 14.
 
@@ -53,7 +55,9 @@ def calc_atr(df: pd.DataFrame, period: int = 14) -> float:
     float
         ATR at the most recent bar.
     """
-    return float((df["high"] - df["low"]).rolling(period).mean().iloc[-1])
+    from copilot.detectors.smc_lib import true_range_atr
+
+    return float(true_range_atr(df, period)[-1])
 
 
 def extract_arrays(
