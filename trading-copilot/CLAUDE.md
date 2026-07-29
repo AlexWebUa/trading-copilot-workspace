@@ -20,14 +20,20 @@ built-state snapshot; **[docs/AUDIT_HISTORY.md](docs/AUDIT_HISTORY.md)** explain
   `smartmoneyconcepts` rewrap, broken-tool quarantine, CD rewrite, honest cost model, re-baseline.
   The re-baseline (`REBASELINE_2026-06-10.md`) found **no rule has a positive edge** under honest
   costs — earlier positive backtests were look-ahead + one-sided-fee artifacts.
-- **P1 is the current frontier.** P1-1 is **done**: `tests/test_probe_regression.py` encodes all 20
-  June probes (13 passing + 7 `xfail(strict)` documenting unfixed P2-tier bugs); the vacuous
-  `test_detectors_liquidity.py` was deleted; the 2 breaker-block tests that fail on the known P2-2
-  bug were marked `xfail(strict)`. P1-3 is **done** (`agent.py` multi-TF keying + anti-hallucination
-  check). P1-2 is **done** (`prompts.py` HTF-POI hard gate + conflict hierarchy MS > sweep > OB/FVG >
-  orderflow + position management; `state.py` HTF-POI lifecycle diffs; removed the noise "upgrade" path
-  and calls to unregistered `check_*` composites). Still pending: P1-4 probability assessment. No feature
-  work (P3+) until P0–P1 land.
+- **P1-1/P1-2/P1-3 and P2-1/P2-2 are done.** `tests/test_probe_regression.py` encodes all 20 June
+  probes; the vacuous `test_detectors_liquidity.py` was deleted; `agent.py` keys tool results by
+  `(name, symbol, tf)` and runs the anti-hallucination check; `prompts.py` enforces the HTF-POI hard
+  gate + conflict hierarchy MS > sweep > OB/FVG > orderflow + position management. The detector
+  repairs flipped every probe `xfail` except the quarantined tools: the suite is now **351 pass +
+  3 xfail** (compression, cd_absorption, rejection_block — all quarantined, all still broken by
+  design). Still pending: P1-4 probability assessment.
+- **⚠️ P0b (P0-8…P0-11) is the current frontier and gates everything.** A 2026-07-29 review found
+  three verified evidence-integrity bugs of the same class as P0-1…P0-7 — see [PLAN.md](PLAN.md).
+  Until P0-8 lands and the re-baseline is re-run, **backtest numbers are still not trustworthy**:
+  the engine never scans the entry bar for SL/TP, so every trade gets one bar of stop immunity and
+  trades left open at end-of-data are dropped from the stats entirely. The registry result cache
+  also ignores detector kwargs, so re-probing a detector with different params silently returns the
+  previous answer. No feature work (P3+) until P0b–P1 land.
 - Detectors still flagged unreliable/quarantined live in `DETECTOR_REVIEW_2026-06-10.md` and
   `_QUARANTINED_TOOLS` in `copilot/llm/tools.py`. Don't build on them without checking that doc first.
 
