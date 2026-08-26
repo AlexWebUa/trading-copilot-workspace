@@ -1,7 +1,7 @@
 ---
 title: Неоднозначности и пробелы
 tags: [index, meta, ambiguities]
-updated: 2026-04-18
+updated: 2026-08-04
 ---
 
 # Неоднозначности, пробелы и вопросы к автору
@@ -83,6 +83,55 @@ updated: 2026-04-18
 
 ### ~~[[../06_Bias_Templates/Quarterly_Theory]] — материалы на отдельных Notion-страницах~~ ✅ закрыто
 - **Статус**: Все 3 страницы материалов получены в `raw_notion/`. Quarterly Theory полностью написана: фракталы времени, True Open, AMDX/XAMD, SSMT (+ Hidden SSMT, валидация), Time Theory, общие наблюдения, сетап-структура. Статус заметки → defined.
+
+---
+
+## Открытые вопросы — Group 17, course-archiver (2026-08-04)
+
+### [[../01_Concepts/Context_Determination]] — BIAS vision. Bell — пустая страница
+- **Источник**: `course-archiver/output/DT_MATERIAL_50/context_-_BIAS_vision_Bell/notion.md`
+- **Тип**: `incomplete`
+- **Проблема**: Страница — это только скелет заголовков («Инструменты», «Актив», «Период», «Тайм-Фреймы», «Liquidity Grab From BSL\SSL», «Visual Confirm», «Order Flow Confirm») без единого предложения содержания под ними + незагрузившееся видео («Loading...»). Автор Bell не заполнил шаблон либо контент рендерился видео-плеером, которого скрейпер не захватил.
+- **Предложение**: Запросить у автора текстовое заполнение или ссылку на видео-разбор; пока не добавляется в [[../01_Concepts/Context_Determination]].
+
+### [[../01_Concepts/Multi_TF_Analysis]] — Синхронизация ТФ by Sobol — контент только на скриншотах
+- **Источник**: `course-archiver/output/DT_MATERIAL/indices-price-action_-_Синхронизация_таймфреймов_by_Sobol/notion.md`
+- **Тип**: `needs_image`
+- **Проблема**: Пошаговый разбор W→D→4H→H1→M15→M5 почти целиком передаётся через 11 скриншотов графика («на скрине видим…»); текстовые связки называют инструменты (недельный фрактал, инверсия daily FVG, BPR, 4H FVG, часовой фрактал + инверсия, SMT с 500, m15/m5 инверсия), но не описывают сам паттерн на цене.
+- **Предложение**: Не по плану на повторную обработку — проектное решение: изображения из источников в БЗ не переносятся и текстом не описываются (см. решение по проекту от 2026-08-04). Названные инструменты уже покрыты профильными заметками `03_Tools/`; сам пример не пересказывается.
+
+### [[../01_Concepts/Context_Determination]] — Sooloogoonee vs PashaTrltsk: жёсткость привязки к HTF-синхронизации
+- **Источник**: `course-archiver/output/DT_MATERIAL_50/context_-_Bias_vision_Sooloogoonee/notion.md`
+- **Тип**: `contradiction`
+- **Проблема**: PashaTrltsk обуславливает менеджмент позиции синхронизацией HTF/LTF (при рассинхроне — обязательное сопровождение, RR < 2). Sooloogoonee допускает внутридневную позицию **против** глобального потока приказов, если её подтверждает OF на LTF — то есть глобальный ТФ не имеет права вето. Оба ментора первичным считают ликвидность/OF, но расходятся в том, насколько сильно решение обязано подчиняться HTF.
+- **Предложение**: Уже отражено как явное предупреждение прямо в тексте [[../01_Concepts/Context_Determination]] (раздел «Sooloogoonee»); дальнейших действий не требуется, если не появится третий источник для арбитража.
+
+### [[../05_Sessions_Timings/Session_Dynamics]] — «LTF world» — пустая страница
+- **Источник**: `course-archiver/output/DT_MATERIAL/sessions/notion_7.md` (идентичен `sessions-1/notion_7.md`)
+- **Тип**: `incomplete`
+- **Проблема**: Только скелет заголовков (Инструменты, Актив, Stop-Loss, Entry Time x Time Frames, Targets, Entry Model) без содержания — тот же паттерн, что у Bell/BIAS vision (Group 17, C1).
+- **Предложение**: Не мигрируется, пока автор не заполнит источник.
+
+### ~~[[../06_Bias_Templates/ICT_Daily_Bias]] — BIAS vision. Blinchikof~~ ✅ закрыто
+- **Статус**: Обработано при пилоте `06_Bias_Templates` (Group 19, 2026-08-04). Большая часть содержания (Tue/Wed недельный экстремум, Classic Buy/Sell Day, Judas Swing) оказалась уже покрыта [[../06_Bias_Templates/Weekly_Templates]], [[../06_Bias_Templates/ICT_Intraday_Templates]] и [[../08_Entry_Models/ICT_Judas_Swing]] — без создания дублирующей заметки. Уникальный вклад (явная цепочка рассуждения Weekly BIAS → Daily BIAS → таргет PDH/PDL) добавлен как раздел «Каскад Weekly → Daily BIAS (Blinchikof)» в [[../06_Bias_Templates/ICT_Daily_Bias]].
+
+### ~~[[../08_Entry_Models/ICT_Silver_Bullet]] — ICT SILVER BULLET [INDICES] — только ссылки на подстраницы~~ ✅ закрыто
+- **Статус**: Досканировано (Group 26, 2026-08-05) — 5 из 6 подстраниц (Model, Rules, Risk management, Take-Profit, Issues; Notes не стабилизировалась при скрейпе, пропущена). Содержание оказалось **дословным дубликатом** уже существующей заметки (тайминги 03-04/10-11/14-15 EST, пулы EQH/EQL/Compression/Swing/PDH-PDL/London, RR 1/1.3, риск 1%, дневной лимит 1%, TP "low hanging fruit", BE-список — совпадает вплоть до порядка пунктов). Новых сведений не даёт; добавлена только вторая ссылка в `sources:`.
+
+### ~~[[../09_Setups/Local_Continuation]] — Local Continuation (Bellissimo) — только ссылки на подстраницы~~ ✅ закрыто
+- **Статус**: Досканировано (Group 26, 2026-08-05) — все 6 подстраниц захвачены (Explanation, Bell Vision, Alex Vision, Eric Vision, Chudo Vision, Backtests). В отличие от Silver Bullet — контент **genuinely новый**: 4 независимые авторские вариации LTF-входа (10M/5M/1M) поверх контекста 1h3m, ранее не покрытые KB никак. Создана новая заметка [[../09_Setups/Local_Continuation]]. `Backtests` — только внешние ссылки на приватные Notion-журналы бэктестов, не мигрируется (см. таблицу «вне периметра» в PLAN.md — торговые журналы).
+
+### ~~[[../08_Entry_Models/Entry_Models]] — DYNAMIC ENTRY MODELS (PashaTrltsk, stream-recordings)~~ ✅ закрыто без изменений
+- **Статус**: Проверено — таксономия (Default / Internal Manipulation / LTF OF / Return to IMB) уже дословно совпадает с существующей таблицей в [[../08_Entry_Models/Entry_Models]] (источник `raw_notion/ДИНАМИКА_ENTRY_MODELS.md`). Новых сведений не даёт.
+
+### ~~[[../02_Market_Structure/Market_Structure]] — минорная структура: один ТФ или разные ТФ?~~ ✅ решено пользователем (2026-08-05)
+- **Источник**: `course-archiver/output/DT_MATERIAL/structure-and-liquidity/notion_1.md`
+- **Тип**: `contradiction`
+- **Проблема**: Текущая заметка явно утверждает: «Swing и Minor Structure определяются **на одном ТФ** — это не мульти-TF разделение». Новый источник (более длинная, независимая версия того же материала) даёт другой пример: «на 1H графике рынок в лонговой структуре; внутри этого движения на 5M формируются локальные откаты и краткосрочная шортовая структура» — то есть явно **разные ТФ** (1H свинг vs 5M минор).
+- **Решение**: Термин **Minor Structure зарезервирован строго за same-TF смыслом** (мелкие свинги внутри того же графика, используемые для Minor BOS). Пример из нового источника (1H контекст → 5M структура для входа) — это отдельное явление, **Multi-TF анализ**, а не Minor Structure; часть источников курса смешивает эти два понятия в изложении, но в KB они разведены явно. В [[../02_Market_Structure/Market_Structure]] добавлено предупреждающее примечание с этим разграничением и ссылкой на [[../01_Concepts/Multi_TF_Analysis]].
+
+### [[../05_Sessions_Timings/Session_Dynamics]] — How to LTF (Bellissimo, stream-recordings) — тот же пустой паттерн
+- **Статус**: Пустой скелет заголовков, идентичный по структуре `sessions/notion_7.md` (LTF world) и Bell/BIAS vision. Третий случай одного и того же незаполненного шаблона у разных менторов — вероятно, общий шаблон курса, заполнявшийся только в видео.
 
 ---
 

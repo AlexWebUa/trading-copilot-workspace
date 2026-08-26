@@ -17,6 +17,7 @@ import importlib
 import json
 import logging
 import pkgutil
+import time
 from typing import Any, Callable
 
 import pandas as pd
@@ -31,6 +32,13 @@ _NO_DF_TOOLS = {"check_multi_tf_alignment", "current_killzone"}
 
 # Tools that need symbol/timeframe passed as kwargs (in addition to the df)
 _PASS_META_TOOLS = {"generate_pine_script"}
+
+# Tools whose result carries a large artifact that belongs on disk rather than
+# in the model's context. The detector stays pure (it just returns the text);
+# this layer — which already does I/O for the OHLC fetch — persists it and
+# hands back a path instead. Both frontends share the registry, so the API
+# agent and the MCP/cli backend get identical behaviour.
+_ARTIFACT_TOOLS = {"generate_pine_script"}
 
 # Tools that need OHLCV + delta columns (buy_vol/sell_vol/delta from klines)
 _DELTA_TOOLS = {"detect_cumulative_delta"}
@@ -55,12 +63,35 @@ class ToolRegistry:
         self._source = data_source or BinanceSource()
         self._schemas: list[dict] = []
         self._callables: dict[str, Callable] = {}
-        self._result_cache: dict[tuple, dict] = {}
+        # (key) -> (monotonic_timestamp, result). See _cache_ttl for why the
+        # timestamp is not optional.
+        self._result_cache: dict[tuple, tuple[float, dict]] = {}
         self._discover()
 
     def clear_cache(self) -> None:
         """Drop all cached detector results (call between MCP requests)."""
         self._result_cache.clear()
+
+    @staticmethod
+    def _cache_ttl(tf: str | None) -> float:
+        """Seconds a cached detector result stays valid, by timeframe.
+
+        P0-10: this cache used to have no time component at all, and
+        clear_cache() is never called by the MCP path — a Claude Desktop stdio
+        server lives for hours, so asking about BTCUSDT 5m in the afternoon
+        returned the morning's candles. On the timeframe the system exists to
+        read. The disk cache below it already expires correctly; this in-memory
+        layer sat in front and defeated it.
+
+        The TTLs are imported, not re-declared, so the two layers cannot drift.
+        """
+        from copilot.data.cache import _DEFAULT_TTL
+
+        if tf is None:
+            # Tools that take no timeframe still depend on live data through
+            # their defaults; 60 s is the tightest TTL in the table.
+            return 60.0
+        return float(_DEFAULT_TTL.get(tf, 300))
 
     def _discover(self) -> None:
         for module_info in pkgutil.iter_modules(_detectors_pkg.__path__):
@@ -123,10 +154,23 @@ class ToolRegistry:
         kwargs = {k: v for k, v in tool_input.items() if k not in _FETCH_PARAMS}
 
         # Request-scoped result cache — avoids recomputing the same detector
-        # within one analysis session (cleared by clear_cache() between MCP calls)
-        cache_key = (tool_name, symbol, tf, bars, start_time, end_time)
-        if cache_key in self._result_cache:
-            return self._result_cache[cache_key]
+        # within one analysis session (cleared by clear_cache() between MCP calls).
+        #
+        # P0-9: the key includes the detector kwargs. 15 of 16 exposed tools take
+        # params, so a key of (tool, symbol, tf, bars, range) made a re-probe with
+        # different params return the FIRST answer — silently, with genuine-looking
+        # numbers that _verify_report_numbers cannot flag. Same bug class as the
+        # P0-2 HTF cache-key fix.
+        cache_key = (
+            tool_name, symbol, tf, bars, start_time, end_time,
+            json.dumps(kwargs, sort_keys=True, default=str),
+        )
+        cached = self._result_cache.get(cache_key)
+        if cached is not None:
+            cached_at, cached_result = cached
+            if time.monotonic() - cached_at < self._cache_ttl(tf):
+                return cached_result
+            del self._result_cache[cache_key]
 
         # Delta tools need buy_vol/sell_vol/delta columns from klines
         if tool_name in _DELTA_TOOLS:
@@ -145,7 +189,7 @@ class ToolRegistry:
             except Exception as e:
                 logger.exception("Detector %r raised", tool_name)
                 return {"error": f"Detector {tool_name} raised: {e}"}
-            self._result_cache[cache_key] = result
+            self._result_cache[cache_key] = (time.monotonic(), result)
             return result
 
         try:
@@ -164,8 +208,41 @@ class ToolRegistry:
         except Exception as e:
             logger.exception("Detector %r raised", tool_name)
             return {"error": f"Detector {tool_name} raised: {e}"}
-        self._result_cache[cache_key] = result
+
+        if tool_name in _ARTIFACT_TOOLS:
+            result = _persist_artifact(tool_name, result, symbol, tf)
+
+        self._result_cache[cache_key] = (time.monotonic(), result)
         return result
 
     def tool_names(self) -> list[str]:
         return list(self._callables.keys())
+
+
+def _persist_artifact(tool_name: str, result: dict, symbol: str, tf: str) -> dict:
+    """Write a tool's bulky artifact to disk, replacing it with a path.
+
+    `generate_pine_script` returns several hundred lines of Pine. Feeding that
+    back through the tool result would burn context on every analysis and drag
+    every drawn price level into the transcript. The detector stays pure; the
+    file lands in ~/.trading-copilot/pine/ and the model gets `pine_file`.
+
+    A failed write is not fatal: the script stays in the result and the model can
+    still print it, which beats losing the analysis over a disk error.
+    """
+    if tool_name != "generate_pine_script":
+        return result
+    script = result.get("pine_script")
+    if not isinstance(script, str) or not script:
+        return result
+
+    from copilot.pine.store import save_pine
+
+    out = dict(result)
+    try:
+        out["pine_file"] = str(save_pine(symbol, tf, script))
+        out.pop("pine_script", None)
+    except Exception as e:
+        logger.exception("Failed to save Pine artifact for %s/%s", symbol, tf)
+        out["pine_file_error"] = str(e)
+    return out

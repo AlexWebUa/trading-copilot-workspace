@@ -2,9 +2,9 @@
 title: Работа внутри POI (TF-синхронизация)
 tags: [poi, entry, multi-tf, synchronization]
 aliases: [Work in POI, Работа в POI, TF синхронизация в POI]
-sources: [raw_notion/Work_in_POI.md]
+sources: [raw_notion/Work_in_POI.md, course-archiver/output/DT_MATERIAL_50/block-5/notion_3.md]
 status: defined
-updated: 2026-04-18
+updated: 2026-08-05
 ---
 
 # Работа внутри POI (TF-синхронизация)

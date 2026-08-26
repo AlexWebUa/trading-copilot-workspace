@@ -71,6 +71,7 @@ QM или Failure Swing + SMT-дивергенция между коррелир
 
 ## Связанные заметки
 
+- [[../08_Entry_Models/Elements_of_Trade_Setup|Elements of Trade Setup — 4 типа контекста + POI]]
 - [[../08_Entry_Models/Entry_Models_Practical|Практические модели: 30mOF, 1h3m, 1hIMB]]
 - [[../08_Entry_Models/ICT_Judas_Swing|ICT Judas Swing]]
 - [[../08_Entry_Models/ICT_Silver_Bullet|ICT Silver Bullet]]

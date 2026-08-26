@@ -8,10 +8,69 @@ write_summary_to_journal — persist TradeRecords to journal.jsonl
 
 from __future__ import annotations
 
+import random
+
 from pathlib import Path
 
 from copilot.journal.record import TradeRecord
 from copilot.journal.writer import append_record
+
+
+
+# ---------------------------------------------------------------------------
+# Uncertainty (P2-3)
+# ---------------------------------------------------------------------------
+# Every arm of the strategy research reports a winrate and an expectancy off a
+# handful of trades — 9 for one Bellissimo arm, 6 for a Silver Bullet one. A
+# bare "66.7%" reads as a finding when it is a coin flip with three heads, and
+# rules get RANKED on those point estimates. These two intervals exist so the
+# ranking cannot silently be noise.
+
+def wilson_interval(wins: int, n: int, z: float = 1.96) -> tuple[float, float]:
+    """95% Wilson score interval for a binomial proportion.
+
+    Wilson rather than the normal approximation: at n < 30, or with a
+    proportion near 0 or 1, the normal interval runs past [0, 1] and is far too
+    narrow. Wilson stays inside the unit interval and keeps its coverage at
+    small n, which is the only regime this study has.
+    """
+    if n <= 0:
+        return (0.0, 0.0)
+    phat = wins / n
+    denom = 1.0 + z * z / n
+    centre = (phat + z * z / (2 * n)) / denom
+    margin = z * ((phat * (1 - phat) / n + z * z / (4 * n * n)) ** 0.5) / denom
+    return (round(max(0.0, centre - margin), 4), round(min(1.0, centre + margin), 4))
+
+
+def bootstrap_expectancy_ci(
+    pnl_r: list[float], iterations: int = 2000, seed: int = 20260823
+) -> tuple[float, float]:
+    """Percentile bootstrap CI for mean R per trade.
+
+    Expectancy is what rules are ranked on, and it is a mean of a wildly
+    non-normal sample (a few +3R winners against a wall of -1R losers), so a
+    parametric interval would be wrong. Resampling makes no distributional
+    assumption. The seed is fixed so a rerun of the same trades reports the
+    same interval — an interval that jitters between runs is worse than none.
+    """
+    n = len(pnl_r)
+    if n == 0:
+        return (0.0, 0.0)
+    if n == 1:
+        return (round(pnl_r[0], 3), round(pnl_r[0], 3))
+
+    rng = random.Random(seed)
+    means = []
+    for _ in range(iterations):
+        total = 0.0
+        for _ in range(n):
+            total += pnl_r[rng.randrange(n)]
+        means.append(total / n)
+    means.sort()
+    lo = means[int(0.025 * iterations)]
+    hi = means[min(iterations - 1, int(0.975 * iterations))]
+    return (round(lo, 3), round(hi, 3))
 
 
 def trades_to_summary(
@@ -34,6 +93,10 @@ def trades_to_summary(
 
     # Change 4: "expired" trades are included and classified by pnl_r sign
     completed = [t for t in trades if t.result in ("win", "loss", "be", "expired")]
+    # Trades still open when the data ran out. Their outcome is unknown, so they
+    # stay out of every statistic — but they are counted and reported, because a
+    # rule that parks capital in unresolved positions must not look clean.
+    unfinished = [t for t in trades if t.result == "pending"]
     wins = [
         t for t in completed
         if t.result == "win"
@@ -75,6 +138,9 @@ def trades_to_summary(
     max_consec = _max_consecutive_losses([t.pnl_r or 0.0 for t in completed])
     pnl_series = [t.pnl_r for t in completed if t.pnl_r is not None]
 
+    winrate_ci = wilson_interval(n_w, n_completed)
+    expectancy_ci = bootstrap_expectancy_ci(pnl_series)
+
     avg_bars = round(sum(bars_in_trade_list) / len(bars_in_trade_list), 1) if bars_in_trade_list else 0.0
     max_bars = max(bars_in_trade_list) if bars_in_trade_list else 0
 
@@ -104,7 +170,10 @@ def trades_to_summary(
         wins=n_w,
         losses=n_l,
         breakevens=n_be,
+        unfinished=len(unfinished),
         winrate=winrate,
+        winrate_ci=winrate_ci,
+        expectancy_ci=expectancy_ci,
         avg_winner_r=avg_winner_r,
         avg_loser_r=avg_loser_r,
         expectancy=expectancy,
@@ -139,6 +208,11 @@ def print_summary(summary: "BacktestSummary") -> None:  # noqa: F821
         f"Skipped (R:R): {summary.skipped_rr:<4}  "
         f"Skipped (entry timeout): {summary.skipped_entry}"
     )
+    if summary.unfinished:
+        print(
+            f"{summary.unfinished} сделок не завершилось "
+            "(открыты на конец данных — исключены из статистики)"
+        )
     print(sep)
     n_completed = summary.wins + summary.losses
     if n_completed == 0:
@@ -149,6 +223,17 @@ def print_summary(summary: "BacktestSummary") -> None:  # noqa: F821
             f"Wins : {summary.wins}   Losses : {summary.losses}   B/E : {summary.breakevens}"
         )
         print(f"Winrate : {wr_pct}%   PF: {summary.profit_factor}   Expectancy: {summary.expectancy:+.2f}R")
+        wr_lo, wr_hi = summary.winrate_ci
+        ex_lo, ex_hi = summary.expectancy_ci
+        verdict = (
+            "edge" if ex_lo > 0 else
+            "negative" if ex_hi < 0 else
+            "indistinguishable from zero"
+        )
+        print(
+            f"  95% CI  winrate [{wr_lo * 100:.1f}%, {wr_hi * 100:.1f}%]   "
+            f"expectancy [{ex_lo:+.2f}R, {ex_hi:+.2f}R] — {verdict}"
+        )
         print(
             f"Avg W: +{summary.avg_winner_r}R   Avg L: {summary.avg_loser_r}R   "
             f"MaxConsecL: {summary.max_consec_losses}"

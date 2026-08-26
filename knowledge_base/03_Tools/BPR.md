@@ -2,9 +2,9 @@
 title: BPR (Balanced Price Range)
 tags: [tool, poi]
 aliases: [BPR, Balanced Price Range, Сбалансированный диапазон]
-sources: [raw_notion/BPR.md]
+sources: [raw_notion/BPR.md, course-archiver/output/DT_MATERIAL_50/block-3/notion_8.md]
 status: defined
-updated: 2026-04-18
+updated: 2026-08-05
 ---
 
 # BPR (Balanced Price Range)
@@ -26,6 +26,14 @@ updated: 2026-04-18
 |----------|---------------|
 | **POI** | Работа идентична другим зонам спроса/предложения, но строго в **контексте** — иначе winrate низкий |
 | **Entry Model** | Точечный вход по реакции от BPR на LTF |
+
+## Признаки качественного BPR
+
+Наиболее сильные зоны BPR обычно формируются:
+- после выраженного **displacement**;
+- в **V-образных** разворотах;
+- **после снятия ликвидности**;
+- в **активные сессионные часы**.
 
 ## Связанные заметки
 

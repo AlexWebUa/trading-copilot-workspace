@@ -58,6 +58,34 @@ TOOL_SCHEMA = {
 _SWEEP_SCAN_BARS = 30
 
 
+
+def _forms_equal_extreme(
+    values, i: int, tol: float, scan_start: int, exclude_level: float
+) -> bool:
+    """Does the sweeping candle's own extreme sit level with another one?
+
+    ICT's re-sweep guard: "the candle that took the liquidity must not itself
+    form EQH/EQL", because a new equal extreme is an invitation for price to
+    come back and take it too. Equality uses the same ATR-scaled tolerance as
+    the pools themselves, so the test is consistent with how EQH/EQL are
+    grouped in the first place — the library's own 1%-of-chart-range default
+    would instead widen and narrow with the size of the slice.
+
+    The swept level is excluded: matching the pool it just raided is the
+    definition of a sweep, not a re-sweep.
+    """
+    if tol <= 0:
+        return False
+    own = values[i]
+    for j in range(scan_start, i):
+        other = values[j]
+        if abs(other - exclude_level) <= tol:
+            continue
+        if abs(other - own) <= tol:
+            return True
+    return False
+
+
 def detect_liquidity(
     df: pd.DataFrame,
     tolerance_atr: float = 0.15,
@@ -157,7 +185,15 @@ def detect_liquidity(
                         "side": "buyside",
                         "swept_level": round(level, 2),
                         "sweep_ts": tss[i],
+                        # When the pool itself formed. "Only a fractal of the
+                        # current day counts" needs the pool's age, not the
+                        # sweep's — they can be days apart.
+                        "pool_ts": tss[pool["end_idx"]],
+                        "pool_age_bars": int(i - pool["end_idx"]),
                         "closed_back": True,
+                        "forms_equal_extreme": _forms_equal_extreme(
+                            highs, i, tol, scan_start, level
+                        ),
                     })
                     break  # one sweep event per pool — the first taking
                 if closes[i] > level + tol:
@@ -168,7 +204,15 @@ def detect_liquidity(
                         "side": "sellside",
                         "swept_level": round(level, 2),
                         "sweep_ts": tss[i],
+                        # When the pool itself formed. "Only a fractal of the
+                        # current day counts" needs the pool's age, not the
+                        # sweep's — they can be days apart.
+                        "pool_ts": tss[pool["end_idx"]],
+                        "pool_age_bars": int(i - pool["end_idx"]),
                         "closed_back": True,
+                        "forms_equal_extreme": _forms_equal_extreme(
+                            lows, i, tol, scan_start, level
+                        ),
                     })
                     break
                 if closes[i] < level - tol:

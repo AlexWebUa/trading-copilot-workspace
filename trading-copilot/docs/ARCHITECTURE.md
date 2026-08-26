@@ -52,7 +52,14 @@ copilot/
 │   │   absorption_poi.py, cd_divergence_structure.py
 │   ├── multi_tf.py          HTF/LTF reconciliation (no DataFrame)
 │   ├── sessions.py          killzone / OTT helpers (no DataFrame)
-│   └── pine_script.py       runs all detectors → TradingView v5 overlay
+│   └── pine_script.py       charts the detectors the analysis deemed significant (thin wrapper
+│                            over pine/) → TradingView v5 overlay
+│
+├── pine/
+│   ├── emitters.py          per-detector Pine bodies + EmitContext (shared with debug_detectors.py)
+│   ├── runners.py           how each detector is invoked to produce those bodies
+│   ├── overlay.py           OVERLAY_LAYERS + build_overlay: chosen layers → one toggle-able indicator
+│   └── store.py             writes ~/.trading-copilot/pine/{SYMBOL}_{tf}_{ts}.pine
 │
 ├── llm/
 │   ├── tools.py             ToolRegistry: auto-discovers TOOL_SCHEMA, fetches data, dispatches
@@ -83,10 +90,18 @@ when its `close_time > now`. Analyzing an in-progress bar repaints and violates 
 CLOSE" rule. Historical ranges are unaffected (their last bar is already closed).
 
 ### Fetch & cache (`data/binance.py`, `data/cache.py`)
-USD-M perpetual futures (`fapi.binance.com`) by default — what discretionary traders actually trade;
-spot is a fallback. Up to 1500 bars/request; `_fetch_range` paginates. Parquet disk cache keyed by
-`(source, symbol, tf, bars)` or `(…, start, end)`, TTL per TF (1m/3m 60s, 15m/1h 5min, 4h/1d 1h).
-`fetch_multi_tf` returns `{tf: DataFrame}`. Delta has its own cache namespace so column sets never collide.
+USD-M perpetual futures (`fapi.binance.com`) by default — what discretionary traders actually trade.
+Spot (`api.binance.com`) is a first-class alternative, not a fallback: tokenised stocks and part of the
+commodities section list on spot only, and futures answers `-1121 Invalid symbol` for them. `resolve_market()`
+picks between the two (explicit arg > `COPILOT_MARKET` > `futures`); `--market` / the `market` REPL command
+exports the env var so the choice reaches both the in-process registry and the MCP server the cli backend
+spawns. `_get()` translates a `-1121` into `SymbolNotOnMarket` naming the market to try instead.
+
+Up to 1500 bars/request; `_fetch_range` paginates. Parquet disk cache keyed by
+`(source, symbol, tf, bars)` or `(…, start, end)`, TTL per TF (1m/3m 60s, 15m/1h 5min, 4h/1d 1h) — the
+`source` term is `binance_futures` / `binance_spot`, so the same symbol on two markets never shares a
+cache entry. `fetch_multi_tf` returns `{tf: DataFrame}`. Delta has its own cache namespace so column
+sets never collide, and follows the source's market (a spot backtest no longer pulls futures delta).
 
 ### Pluggability (`data/base.py`)
 `DataSource` is a Protocol (`get_ohlc`, `supports`). Binance is the first impl; adding a source = new file
@@ -164,8 +179,9 @@ The KB is read-only from `../knowledge_base/`; the co-pilot never writes to it.
 
 Claude's final turn emits a structured markdown report (driven by the `prompts.py` template): Bias
 (HTF/MTF/LTF) → **HTF POI** (the gate verdict) → Active Setup (LIVE/PENDING/INVALID) → Confirmed ✅ /
-Pending ⏳ / Invalidates ❌ → Levels (entry/stop/TP1/TP2) → Orderflow → RR → **Management** → What I
-Checked (each tool call + key finding). Reports persist to `~/.trading-copilot/reports/{symbol}_{ts}.md`.
+Pending ⏳ / Invalidates ❌ → Levels (entry/stop/TP1/TP2) → Orderflow → RR → **Management** → **Chart** →
+What I Checked (each tool call + key finding). Reports persist to
+`~/.trading-copilot/reports/{symbol}_{ts}.md`.
 The anti-hallucination contract: **every price in the report must appear in at least one tool result** —
 if check fails, treat it as a P0 bug.
 
@@ -181,6 +197,12 @@ rules:
 - **Position management.** Stop behind the POI extreme / SC wick; no break-even by default; 80% partial at
   the First Trouble Area + 20% at the main pool; sync→extend / desync→nearest pool; ≥1.5R.
 
+A fourth rule governs the chart output: **CHART OUTPUT** requires a closing `generate_pine_script` call
+carrying only the detectors that materially drove the verdict — the POI's source, whatever produced each
+price in Levels, and the structure detector. Charting everything the analysis touched would put the
+discarded evidence on the trader's chart next to the live setup. The registry writes the overlay to
+`~/.trading-copilot/pine/` and returns `pine_file`, so the Pine text never enters the model's context.
+
 The prompt reads volume-profile context (`current_price_location`, `nearest_hvn_*`, `hvn_nodes`) straight
 from `detect_volume_profile` output — it does **not** call the `ob_in_hvn`/`poc_location`/`price_in_lvn`
 composites, which are backtest-only (no `TOOL_SCHEMA`, so unregistered for the LLM). The cross-run state
@@ -191,8 +213,9 @@ alongside FVG fills, liquidity sweeps, POC shifts, and structure shifts.
 
 - **Per detector (automated):** `pytest tests/test_detectors_*.py` + `tests/test_probe_regression.py`,
   fixture-based with positive / negative / edge cases. See [CONVENTIONS.md](CONVENTIONS.md) test standards.
-- **Visual:** generate Pine Script via `generate_pine_script`, overlay on TradingView, compare to
-  high-rated community scripts.
+- **Visual:** per-detector debug files via `scripts/debug_detectors.py`, or the analysis overlay via
+  `generate_pine_script`; overlay on TradingView and compare to high-rated community scripts. Both paths
+  share `copilot/pine/`, so a zone drawn in one is the zone drawn in the other.
 - **Agent loop:** `tests/test_agent_loop.py` mocks the Anthropic client with scripted `tool_use`
   responses; verifies the dispatcher calls the right detector with the right args. No real API in CI.
 - **End-to-end (manual, per milestone):** run the REPL against live Binance during a killzone; confirm

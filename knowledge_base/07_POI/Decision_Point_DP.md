@@ -2,9 +2,9 @@
 title: Decision Point (DP)
 tags: [poi, dp, decision-point, context, fvg]
 aliases: [DP, Decision Point, Точка принятия решения]
-sources: [raw_notion/Decision_Point_DP.md]
+sources: [raw_notion/Decision_Point_DP.md, course-archiver/output/DT_MATERIAL/useful_-_Decision_Point_DP/notion.md]
 status: defined
-updated: 2026-04-18
+updated: 2026-08-05
 ---
 
 # Decision Point (DP)

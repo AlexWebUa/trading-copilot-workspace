@@ -174,6 +174,15 @@ def test_verify_report_numbers_flags_hallucinated_price():
     assert "67.10k" not in unverified
 
 
+def test_verify_report_numbers_handles_thousands_separators():
+    """A comma-grouped price is one number: splitting "64,938" into 64 and 938
+    flagged two phantom values on every report that used separators."""
+    results = {"detect_liquidity@BTCUSDT@1h": {"buyside": [65358.0], "price": 64938.0}}
+    report = "Price 64,938 — BSL at 65,358, target 70,500"
+    unverified = _verify_report_numbers(report, results)
+    assert unverified == ["70,500"]  # only the invented level
+
+
 def test_verify_report_numbers_ignores_rr_dates_and_times():
     results = {"x": {"price": 66200.0}}
     report = "2026-06-19 09:00 Kyiv — 1.5R to TP, equilibrium 66.2k, fib 0.705"

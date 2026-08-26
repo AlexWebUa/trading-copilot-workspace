@@ -2,9 +2,9 @@
 title: TGIF Setup (Thank God It's Friday)
 tags: [setup, weekly, tgif, manipulation, weekly-candle, context]
 aliases: [TGIF, TGIF Setup, Thank God It's Friday]
-sources: [raw_notion/TGIF_Setup.md]
+sources: [raw_notion/TGIF_Setup.md, course-archiver/output/DT_MATERIAL_50/sessions-2/notion_4.md]
 status: defined
-updated: 2026-04-19
+updated: 2026-08-05
 ---
 
 # TGIF Setup (Thank God It's Friday)

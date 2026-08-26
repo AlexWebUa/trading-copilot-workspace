@@ -51,6 +51,27 @@ def test_prompt_contains_position_management():
     assert "## Management" in text
 
 
+def test_prompt_instructs_charting_only_significant_detectors():
+    """The Pine overlay is worthless if the model charts everything it touched."""
+    text = _core_text()
+    # The instruction is wrapped across lines in the prompt source.
+    flat = " ".join(text.split())
+    assert "CHART OUTPUT" in text
+    assert "generate_pine_script" in text
+    # The judgement, stated plainly enough that the model cannot read it as
+    # "chart every detector you called".
+    assert "materially drove the verdict" in flat
+    assert "checked and then discarded" in flat
+    # And the report must have somewhere to put the resulting path.
+    assert "## Chart" in text
+    assert "pine_file" in text
+
+
+def test_prompt_caps_chart_calls_at_two():
+    flat = " ".join(_core_text().split())
+    assert "Never more than two calls per analysis" in flat
+
+
 def test_prompt_omits_phantom_and_quarantined_tools():
     """Regression guard: the prompt must not reference unregistered/quarantined tools."""
     text = _core_text()

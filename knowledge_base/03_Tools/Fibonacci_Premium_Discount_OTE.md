@@ -2,9 +2,9 @@
 title: Fibonacci, Premium/Discount, OTE
 tags: [tool, poi]
 aliases: [Fibonacci, Premium, Discount, OTE, Optimal Trade Entry, Premium Zone, Discount Zone]
-sources: [raw_notion/Fibonacci_PremiumDiscount_OTE.md]
+sources: [raw_notion/Fibonacci_PremiumDiscount_OTE.md, course-archiver/output/DT_MATERIAL_50/block-2/notion_1.md]
 status: defined
-updated: 2026-04-18
+updated: 2026-08-05
 ---
 
 # Fibonacci, Premium/Discount, OTE

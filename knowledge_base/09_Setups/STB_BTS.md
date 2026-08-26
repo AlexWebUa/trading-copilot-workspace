@@ -2,9 +2,9 @@
 title: STB / BTS (Sell to Buy / Buy to Sell)
 tags: [setup, poi, zone, liquidity, structure]
 aliases: [STB, BTS, Sell to Buy, Buy to Sell, STB/BTS]
-sources: [raw_notion/STBBTS.md]
+sources: [raw_notion/STBBTS.md, course-archiver/output/DT_MATERIAL_50/block-3/notion_3.md]
 status: defined
-updated: 2026-04-18
+updated: 2026-08-05
 ---
 
 # STB / BTS (Sell to Buy / Buy to Sell)

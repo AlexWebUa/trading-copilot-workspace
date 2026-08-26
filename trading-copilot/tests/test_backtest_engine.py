@@ -353,6 +353,7 @@ def test_ltf_exit_resolves_trade():
         entry_after="next_open",
         sl_logic="pct:5.0",   # SL = 95
         tp_logic="rr:1.6",    # TP = 108 (never hit on HTF ±0.2 bars)
+        min_rr=1.0,           # exercising LTF exit mechanics, not the R:R gate
         entry_tf="5m",
         entry_after_ltf="signal_close",
         max_entry_wait_bars_ltf=200,
@@ -543,6 +544,7 @@ def test_partial_tp_engine_integration():
         entry_after="signal_close",
         sl_logic="pct:5.0",
         tp_logic="rr:3.0",  # fallback (unused when tp_levels set)
+        min_rr=1.0,         # TP1 is 1.5R by design here — the gate is tested separately
         tp_levels=[TPLevel("rr:1.5", 0.5), TPLevel("rr:3.0", 0.5)],
         sl_after_tp1=None,  # keep SL at 95 so bars with low=99 don't stop out
     )
@@ -694,3 +696,86 @@ def test_variable_risk_pnl_pct_series():
     assert summary.pnl_pct_series == pytest.approx([1.0, -0.5], abs=0.001)
     assert summary.total_pnl_pct == pytest.approx(0.5, abs=0.001)
     assert summary.monthly_pnl_pct > 0  # 3 months period
+
+
+# ---------------------------------------------------------------------------
+# P2-3 — uncertainty on small samples
+# ---------------------------------------------------------------------------
+
+class TestConfidenceIntervals:
+    """Arms in the strategy research run to single-digit trade counts, and
+    rules get ranked on their point estimates. These intervals are what stops
+    that ranking from being noise."""
+
+    def test_wilson_stays_inside_the_unit_interval_at_the_extremes(self):
+        """The normal approximation runs past 0 and 1 here; Wilson must not."""
+        from copilot.backtest.report import wilson_interval
+
+        for wins, n in ((0, 5), (5, 5), (1, 6), (9, 10)):
+            lo, hi = wilson_interval(wins, n)
+            assert 0.0 <= lo <= hi <= 1.0, f"{wins}/{n} → [{lo}, {hi}]"
+
+    def test_wilson_narrows_as_the_sample_grows(self):
+        from copilot.backtest.report import wilson_interval
+
+        small = wilson_interval(6, 9)
+        large = wilson_interval(600, 900)      # same proportion, 100x the data
+        assert (large[1] - large[0]) < (small[1] - small[0]) / 5
+
+    def test_wilson_brackets_the_point_estimate(self):
+        from copilot.backtest.report import wilson_interval
+
+        lo, hi = wilson_interval(6, 9)
+        assert lo < 6 / 9 < hi
+
+    def test_wilson_on_no_trades_is_degenerate_not_a_crash(self):
+        from copilot.backtest.report import wilson_interval
+
+        assert wilson_interval(0, 0) == (0.0, 0.0)
+
+    def test_bootstrap_is_deterministic(self):
+        """An interval that jitters between runs of the same trades is worse
+        than no interval — the ranking would move on reruns."""
+        from copilot.backtest.report import bootstrap_expectancy_ci
+
+        sample = [2.33, -1.0, -1.0, 1.93, 2.7, 2.56, 2.65, -1.0, 2.85]
+        assert bootstrap_expectancy_ci(sample) == bootstrap_expectancy_ci(sample)
+
+    def test_bootstrap_brackets_the_mean(self):
+        from copilot.backtest.report import bootstrap_expectancy_ci
+
+        sample = [2.33, -1.0, -1.0, 1.93, 2.7, 2.56, 2.65, -1.0, 2.85]
+        lo, hi = bootstrap_expectancy_ci(sample)
+        assert lo < sum(sample) / len(sample) < hi
+
+    def test_a_thin_positive_sample_is_reported_as_inconclusive(self):
+        """The real Bellissimo short arm: +0.361R expectancy over 17 trades,
+        which the interval must NOT present as an edge."""
+        from copilot.backtest.report import bootstrap_expectancy_ci
+
+        short_arm = [2.66, -1, -1, -1, -1, 3.38, 4.06, -1, 2.78,
+                     -1, -1, -1, -1, -1, -1, 1.88, 2.38]
+        lo, hi = bootstrap_expectancy_ci(short_arm)
+        assert lo < 0 < hi, (
+            f"[{lo}, {hi}] excludes zero — a 17-trade sample carried by three "
+            "big winners should not read as an established edge"
+        )
+
+    def test_intervals_reach_the_summary(self):
+        from copilot.backtest.report import trades_to_summary
+        from copilot.journal.record import TradeRecord
+
+        trades = [
+            TradeRecord(result="win", pnl_r=2.0, ts_entry="2026-01-01T00:00:00Z"),
+            TradeRecord(result="loss", pnl_r=-1.0, ts_entry="2026-01-02T00:00:00Z"),
+            TradeRecord(result="win", pnl_r=2.0, ts_entry="2026-01-03T00:00:00Z"),
+        ]
+        s = trades_to_summary(
+            trades=trades, run_id="x", symbol="BTCUSDT", tf="1h",
+            start="2026-01-01T00:00:00Z", end="2026-01-04T00:00:00Z",
+            rule_name="probe", direction="long",
+            total_bars=100, total_signals=3, skipped_rr=0, skipped_entry=0,
+            bars_in_trade_list=[5, 5, 5],
+        )
+        assert s.winrate_ci[0] < s.winrate < s.winrate_ci[1]
+        assert s.expectancy_ci[0] <= s.expectancy <= s.expectancy_ci[1]

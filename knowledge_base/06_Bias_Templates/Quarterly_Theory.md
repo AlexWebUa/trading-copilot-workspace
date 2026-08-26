@@ -2,7 +2,7 @@
 title: Квартальная теория (Quarterly Theory)
 tags: [bias, ict, quarterly, po3, cycle, ssmt, true-open, amdx, time-theory]
 aliases: [Quarterly Theory, Квартальная теория, AMDX, XAMD, True Open, SSMT]
-sources: [raw_notion/Квартальная_теория.md, raw_notion/Quarterly_Theory_Materials_1.md, raw_notion/Quarterly_Theory_Materials_2.md, raw_notion/Qarterly_Theory_Materials_3.md]
+sources: [raw_notion/Квартальная_теория.md, raw_notion/Quarterly_Theory_Materials_1.md, raw_notion/Quarterly_Theory_Materials_2.md, raw_notion/Qarterly_Theory_Materials_3.md, course-archiver/output/DT_TRADING_SERVER/stream-recordings_-_Quarterly_Theory_Morbax_Sooloogoonee/notion.md]
 status: defined
 updated: 2026-04-19
 ---
@@ -154,6 +154,7 @@ updated: 2026-04-19
 - **Forex**: EUR / GBP / DXY
 - **Индексы**: 30 (YM) / 100 (NQ) / 500 (ES)
 - **Бонды**: 5-летние / 10-летние / 30-летние
+- **Крипто**: BTC / ETH / топ-актив по рынку
 
 ### Сравнения в цикле
 

@@ -3,7 +3,9 @@
 from typing import Protocol, runtime_checkable
 import pandas as pd
 
-VALID_TIMEFRAMES = {"1m", "3m", "5m", "15m", "30m", "1h", "4h", "1d"}
+# 1w added Aug 2026: the 1h3m setup wants "1W and 1D agree" as an HTF filter,
+# and nothing in the stack could fetch a weekly bar.
+VALID_TIMEFRAMES = {"1m", "3m", "5m", "15m", "30m", "1h", "4h", "1d", "1w"}
 
 
 @runtime_checkable

@@ -2,9 +2,9 @@
 title: Mitigation Block (MB) + Mitigation-логика
 tags: [tool, poi, rule/global]
 aliases: [MB, Mitigation Block, Блок митигации, Митигация]
-sources: [raw_notion/Mitigation_Block.md, raw_notion/Mitigation_How_it_can_be_used_in_indices.md]
+sources: [raw_notion/Mitigation_Block.md, raw_notion/Mitigation_How_it_can_be_used_in_indices.md, course-archiver/output/DT_MATERIAL_50/block-3/notion_5.md]
 status: defined
-updated: 2026-04-18
+updated: 2026-08-05
 ---
 
 # Mitigation Block (MB)

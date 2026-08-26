@@ -2,9 +2,9 @@
 title: ICT Daily Bias
 tags: [bias, ict, daily, liquidity, structure]
 aliases: [Daily Bias, ICT Daily BIAS, Дневной байас]
-sources: [raw_notion/ICT_DAILY_BIAS.md]
+sources: [raw_notion/ICT_DAILY_BIAS.md, course-archiver/output/DT_MATERIAL_50/context_-_BIAS_vision_Blinchikof/notion.md]
 status: defined
-updated: 2026-04-18
+updated: 2026-08-04
 ---
 
 # ICT Daily Bias
@@ -55,6 +55,17 @@ updated: 2026-04-18
 
 > Одна лишь Indecisive Candlestick ничего не означает — исключительно вспомогательный инструмент.
 
+## Каскад Weekly → Daily BIAS (Blinchikof)
+
+Альтернативная точка входа в определение Daily Bias — сверху вниз от недельного контекста, а не только «три вопроса» выше:
+
+1. **Начать с 1W** — недельный тренд статистически задаёт направление **большинства** дневных свечей той недели (не всех, но достаточно, чтобы торговать по тренду выгоднее статистически). См. [[Weekly_Templates|Weekly Templates]] — ≈70% недельных экстремумов формируется в первые 3 дня.
+2. **Перейти на 1D** — искать актуальные цели/уже достигнутые (та же логика, что «Что было снято / Куда это может привести» выше), но горизонт анализа — **только следующий день**, не далее.
+3. **Правило таргета**: при бычьем Daily BIAS ближайшая цель — **PDH** (Previous Day High); при медвежьем — **PDL** (Previous Day Low).
+4. **Наложить на [[../06_Bias_Templates/ICT_Intraday_Templates|Classic Buy/Sell Day]]** и сессионный нарратив: Asia формирует боковой диапазон → [[../08_Entry_Models/ICT_Judas_Swing|Judas Swing]] на открытии Frankfurt/London снимает границу Asia-range → London формирует основное движение дня → экстремум дня чаще всего формируется к **London Close** → NY закрывает день около этого экстремума.
+
+> Пример сценария (шорт-неделя): BIAS week = short → день должен следовать Classic Sell Day → ближайшая цель PDL → Asia формирует range → Frankfurt снимает ключевую ликвидность сверху (Judas) → London даёт основное шорт-движение → London Close формирует Low дня → NY закрывается около Low.
+
 ## Связанные заметки
 
 - [[../01_Concepts/Context_Determination|Определение контекста]]
@@ -62,4 +73,7 @@ updated: 2026-04-18
 - [[../02_Market_Structure/Market_Structure_Range|MS Range]]
 - [[../06_Bias_Templates/Open_Types|Типы открытия]]
 - [[../06_Bias_Templates/Day_Types|Типы дней]]
+- [[../06_Bias_Templates/Weekly_Templates|Weekly Templates]] — недельный контекст для каскада
+- [[../06_Bias_Templates/ICT_Intraday_Templates|ICT Intraday Templates]] — Classic Buy/Sell Day
+- [[../08_Entry_Models/ICT_Judas_Swing|ICT Judas Swing]] — манипуляционная фаза дня
 - [[../05_Sessions_Timings/PO3_AMD|PO3 / AMD]]

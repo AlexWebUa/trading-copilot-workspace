@@ -2,9 +2,9 @@
 title: Inversion Fair Value Gap (IFVG)
 tags: [tool, poi]
 aliases: [IFVG, Inversion FVG, Inversion Fair Value Gap]
-sources: [raw_notion/Inversion_Fair_Value_Gap_IFVG.md]
+sources: [raw_notion/Inversion_Fair_Value_Gap_IFVG.md, course-archiver/output/DT_MATERIAL_50/block-2/notion_3.md]
 status: defined
-updated: 2026-04-18
+updated: 2026-08-05
 ---
 
 # Inversion Fair Value Gap (IFVG)

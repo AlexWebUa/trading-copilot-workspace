@@ -66,10 +66,10 @@ and none of them raises. All three are verified with reproductions, not suspecte
 
 | Item | Fix | Effort | Status |
 |---|---|---|---|
-| **P0-8** | **Backtest never scans the entry bar.** Entry resolves at bar `signal+1` and `_IN_TRADE` exit scanning starts at `signal+2` (`backtest/engine.py`), so the entry bar's high/low are never tested — every trade gets one bar of stop immunity. Compounding it, `report.trades_to_summary` classifies only win/loss/be/expired, so a trade left `pending` at end-of-data is dropped from winrate/expectancy/PF entirely. Repro: flat 100-bar series, SL 98, entry-bar low 90 → `result=pending`, never exits. Bias is **optimistic**. Add to `tests/test_lookahead_regression.py` and decide explicitly what `pending` does to the stats | S | pending |
-| **P0-9** | **`ToolRegistry` cache key omits detector kwargs.** `cache_key = (tool, symbol, tf, bars, start, end)` (`llm/tools.py`) — 15 of 16 exposed tools take params. Repro: `detect_order_block(swing_lookback=3)` then `(swing_lookback=25)` returns the *same object*. The LLM re-probing with a wider lookback silently reasons on the previous answer, and `_verify_report_numbers` cannot catch it because the numbers are genuine tool-result numbers. Same bug class as the P0-2 HTF cache-key fix | S | pending |
-| **P0-10** | **MCP result cache has no TTL and is never cleared.** Documented as intentional in `mcp_server.call_tool`, but the key has no time component and `clear_cache()` is never called, while a Claude Desktop stdio server can live for hours. Asking for the same symbol/tf/bars later in the day returns the morning's candles — on the timeframe the system exists to read. `data/cache.py` has correct per-TF TTLs; this in-memory layer sits in front and defeats them | S | pending |
-| **P0-11** | Re-run `scripts/rebaseline.py` and rewrite `REBASELINE_2026-06-10.md`. The current numbers came from the P0-8 exit path and are not a valid baseline | S | blocked by P0-8 |
+| **P0-8** | **Backtest never scans the entry bar.** Entry resolves and `_IN_TRADE` scanning starts on the NEXT bar, so every trade got one bar of stop immunity; trades left `pending` at end-of-data were dropped from winrate/expectancy/PF entirely | S | ✅ DONE 2026-08-22 — fix is **per entry mode** (`_ENTRY_BAR_EXPOSED`): `next_open`/`fvg_ce`/`ob_midpoint` now settle the entry bar, while `signal_close` still must not (its range precedes the fill — scanning it would invent stop-outs and flip the bias pessimistic). The LTF entry path was already correct. `pending` stays out of every statistic but is counted and printed as «N сделок не завершилось». Measured bias on `fvg_ob_long`, BTCUSDT 1h, 8000 bars: expectancy +0.131R → +0.082R, PF 1.211 → 1.128 |
+| **P0-9** | **`ToolRegistry` cache key omits detector kwargs.** `cache_key = (tool, symbol, tf, bars, start, end)` (`llm/tools.py`) — 15 of 16 exposed tools take params. Repro: `detect_order_block(swing_lookback=3)` then `(swing_lookback=25)` returns the *same object*. The LLM re-probing with a wider lookback silently reasons on the previous answer, and `_verify_report_numbers` cannot catch it because the numbers are genuine tool-result numbers. Same bug class as the P0-2 HTF cache-key fix | S | ✅ DONE 2026-08-22 — key now carries a sorted JSON dump of the kwargs; regression tests in `tests/test_lookahead_regression.py` cover both a differing re-probe and a still-caching identical call |
+| **P0-10** | **MCP result cache has no TTL and is never cleared.** Documented as intentional in `mcp_server.call_tool`, but the key has no time component and `clear_cache()` is never called, while a Claude Desktop stdio server can live for hours. Asking for the same symbol/tf/bars later in the day returns the morning's candles — on the timeframe the system exists to read. `data/cache.py` has correct per-TF TTLs; this in-memory layer sits in front and defeats them | S | ✅ DONE 2026-08-23 — entries now carry a `time.monotonic()` stamp and expire on the per-TF TTL **imported from `data/cache.py`**, not re-declared, so the two layers cannot drift. Tools with no timeframe get the tightest TTL in the table (60 s) rather than living forever |
+| **P0-11** | Re-run `scripts/rebaseline.py` and rewrite `REBASELINE_2026-06-10.md`. The current numbers came from the P0-8 exit path and are not a valid baseline | S | pending — unblocked (P0-8 done); re-run once the 1h3m rules land so the baseline covers what is actually being researched |
 
 ## P1 — Test integrity & analysis workflow
 
@@ -86,14 +86,17 @@ and none of them raises. All three are verified with reproductions, not suspecte
 |---|---|---|---|
 | **P2-1** | Small fixes: `fib_zones` auto-direction (short OTE); `current_killzone` weekend gate; `multi_tf` single coherent path; `fractals` Williams 5-bar + swept/broken semantics; unify ATR on `true_range_atr`. `rejection_block` **quarantined** indefinitely (definition under manual revision). Also fixed the `debug_detectors.py` Pine offsets (forming-bar anchor, FVG C1 anchor, BOS swing→break). | S | ✅ DONE 2026-06-22 |
 | **P2-2** | Rebuild breaker/mitigation/sponsored on the single library OB (R3); sponsored candle = sweep of a *pool* (R4) | M | ✅ DONE 2026-06-22 — shared `scan_order_blocks`; breaker pierce = close-through; sponsored = nearest-prior-pool sweep; mitigation = no prior sweep |
-| **P2-3** | Binomial CI on winrates in `stats`; QuantStats tearsheet (`journal tearsheet`). **No longer optional** — the re-baseline has rules with 2–3 trades per split. Point estimates on those samples are noise, and step 6 ranks rules on them | S | pending |
-| **P2-5** | Lift the 5000-bar cap in `engine._fetch_data` (~208 days of 1h). Step 6 calls for multi-year data split by week/month; the engine cannot fetch that today. Also decide the multiple-comparisons policy before R&D starts: fixed pre-registered rule set, rolling walk-forward folds rather than one 70/30 split, and "no edge" as an acceptable published result | M | pending |
+| **P2-3** | Binomial CI on winrates in `stats`; QuantStats tearsheet (`journal tearsheet`). **No longer optional** — the re-baseline has rules with 2–3 trades per split. Point estimates on those samples are noise, and step 6 ranks rules on them | S | ✅ DONE 2026-08-23 — Wilson interval for winrate (normal approx. is unusable at n<30) + fixed-seed percentile bootstrap for expectancy, both on `BacktestSummary` and printed with an explicit verdict (`edge` / `negative` / `indistinguishable from zero`). Immediately demoted the Bellissimo short arm from «+0.361R edge» to «+0.065R, CI [−0.76, +1.08]». QuantStats tearsheet still pending |
+| **P2-5** | Lift the 5000-bar cap in `engine._fetch_data`. Step 6 calls for multi-year data split by week/month; the engine could not fetch that | M | ✅ DONE 2026-08-22 — cap removed, and the **real** ceiling turned out to be 1500: `get_ohlc(bars=5000)` silently returned 1499 because Binance caps `limit` per request and the source never paginated. `BinanceSource._paginate_back` walks back in 1500-bar pages; disk cache versioned (`_CACHE_VERSION = 2`) so pre-fix entries are ignored. `fvg_ob_long` on 8000 bars now spans 11 months and 61 trades, against 8 before. Multiple-comparisons policy agreed with the trader: pre-registered rule set, rolling walk-forward folds, «no edge» is a publishable result |
 | **P2-4** | Journal pattern analysis (`journal analyze`, LLM error detection) | M | pending |
 
 ## P3–P5 — Feature work (gated on P1–P2)
 
 | Item | Notes | Status |
 |---|---|---|
+| P3 | **1h3m Bellissimo formalised.** First of the trader's own setups encoded (`backtest/rules_bellissimo.py`, 6 arms: long/short × fta_or_skip / fta_or_liquidity, plus a 1W-filter arm). Required eight engine additions: `min_rr`, unfinished-trade counter, `Condition.value_ref` (compare two moving values across timeframes), `same_day`/`not_same_day` operators, `pool_ts` on sweep records, `invalidation_conditions` in the LTF scan, `tp_logic="fta_or_skip"`/`"fta_or_liquidity"`, `detect_previous_day_levels`. Also found and fixed: the rule evaluator cached detector results by name only, ignoring kwargs (same class as P0-9), and `1w` was missing from every timeframe table | ✅ DONE 2026-08-22 |
+| P3 | **Significant-detector Pine overlay.** The LLM closes each analysis by calling `generate_pine_script` with the detectors that materially drove the verdict; the registry writes the overlay to `~/.trading-copilot/pine/` and returns a path. Pine emitters extracted from `scripts/debug_detectors.py` into `copilot/pine/` and shared by both paths (verified byte-identical for all 19 emitters). Carried the P0-9 fix with it | ✅ DONE 2026-08-22 |
+| P3 | Chart `detect_cumulative_delta` as a layer — needs the delta fetch path plumbed into `generate_pine_script` (registry hands it a plain DataFrame today) | pending |
 | P3 | Dashboard TUI (rich terminal) | blocked by P0–P1 |
 | P3 | Multi-LLM provider abstraction | LOW — deferred |
 | P4 | Screenshot / text trade analysis (multimodal) | blocked by P1-2 |
@@ -103,3 +106,26 @@ and none of them raises. All three are verified with reproductions, not suspecte
 ## Explicitly deferred
 Order placement / broker APIs. Footprint imbalances & VWAP/TPO (L2/tick data unavailable on public REST).
 Web/GUI frontend (REPL + TUI matches the discretionary workflow).
+
+## Defects found during the strategy research (2026-08-23)
+
+All found by running the research, not by reading the code. Each one produced
+plausible numbers rather than an error, which is why they survived so long.
+
+| # | Defect | Impact | Status |
+|---|---|---|---|
+| R-1 | LTF slices were unbounded (`_ltf_df.iloc[:cursor+1]`). `detect_bos` is superlinear: 2k bars 0.16 s → 100k bars 46.8 s, with an identical answer from 1000 bars on | One Bellissimo arm projected to ~13 h; actual 9.4 min after the fix | ✅ `_LTF_LOOKBACK_BARS = 3000` |
+| R-2 | **Missing LTF data silently degraded the strategy.** On a fetch failure the engine logged "LTF entry will be skipped", then fell through to the HTF entry path and backtested a rule *without* its LTF confirmation, reporting plausible numbers for a different strategy | Any 429 mid-run silently invalidated the results | ✅ raises instead |
+| R-3 | `detect_fractals` default `max_results=10` keeps the 10 most recent **in time**, but the target rule wants the nearest **in price** | 11 of 41 target resolutions changed; Bellissimo's short arm went from +0.361R to +0.065R once fixed | ✅ pool raised to 60, cache key includes it |
+| R-4 | `--start/--end` sized the fetch to the window's own length, but the source returns the most recent N bars → the frame ended today and started *after* `start` | 15 Jun – 5 Aug was requested, 4 Jul – 5 Aug scanned; 4 of 5 trades lost | ✅ request reaches back from now |
+| R-5 | LTF frame was fetched from "now" regardless of the HTF window | Date-ranged runs compared timeframes from different periods | ✅ `fetch_ohlcv_batched(end_ms=...)` |
+| R-6 | `pd.Timestamp(aware_dt, tz="UTC")` raised on every date-ranged run | `--start/--end` had never worked at all | ✅ fixed |
+| R-7 | HTF entry path never received the detector registry, and fed `None` targets straight into `compute_rr` | Detector-driven `tp_logic` silently resolved to None there; `nearest_fractal` crashed the run | ✅ fixed |
+| R-8 | `fetch_ohlcv_batched` had no retry | First Binance 429 killed a run (and, via R-2, corrupted it instead) | ✅ backoff on 429/418/5xx |
+| R-9 | Invalidation and entry conditions each recomputed the same detector on the same LTF bar | ~17% of runtime | ✅ shared `call_cache` |
+
+| R-10 | An inverted stop (wrong side of entry) passed the R:R gate — `compute_rr` takes `abs(entry - sl)` | One trade booked at +11.88R, setting an arm's expectancy to +3.29R over 3 trades | ✅ `_stop_is_on_the_right_side` in both entry paths |
+| R-11 | `_ltf_fvg_near_edge` sorted on `ts`/`timestamp`; the field is `formed_ts`, so it took the OLDEST zone | Limit entries rested on stale imbalances; test-arm trade counts were 3x too low | ✅ takes the first zone (list is newest-first) |
+
+**Still open:** the LTF fetch is uncached, so every arm re-downloads ~95k bars
+(64 requests); parallel arms need `-P 3` to stay under the rate limit.

@@ -2,9 +2,9 @@
 title: NDOG / NWOG
 tags: [session, gap, liquidity, tool]
 aliases: [NDOG, NWOG, New Day Opening Gap, New Week Opening Gap]
-sources: [raw_notion/NDOGNWOG.md]
+sources: [raw_notion/NDOGNWOG.md, course-archiver/output/DT_MATERIAL/indices-fundamental_-_NDOGNWOG/notion.md]
 status: defined
-updated: 2026-04-18
+updated: 2026-08-05
 ---
 
 # NDOG / NWOG

@@ -15,6 +15,12 @@ dependencies = [
     "tomli>=2.0.0; python_version < '3.11'",
     "python-dateutil>=2.9.0",
     "pytz>=2024.1",
+    # Windows ships no system timezone database, so zoneinfo.ZoneInfo() raises
+    # ZoneInfoNotFoundError there. backtest/engine.py builds _KYIV_TZ and
+    # _NY_TZ at MODULE level, so without this the whole backtest package fails
+    # to import — not a test, the import. (journal/record.py sidesteps it by
+    # using pytz, which bundles its own database.)
+    "tzdata>=2024.1; sys_platform == 'win32'",
     "smartmoneyconcepts>=0.0.26",
     "mcp>=1.0.0",
 ]

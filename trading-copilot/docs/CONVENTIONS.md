@@ -33,7 +33,10 @@ implementation. Use `smartmoneyconcepts` as a real dependency, not a reference t
 
 **After writing code:**
 - [ ] `pytest` — all tests pass.
-- [ ] Generate Pine Script via `generate_pine_script`, overlay on TradingView, compare visually.
+- [ ] Generate Pine Script — `scripts/debug_detectors.py --detector <name>` for the isolated view, or
+      `generate_pine_script(detectors=[...])` for it in context — overlay on TradingView, compare visually.
+      Both render through `copilot/pine/emitters.py`; a new detector needs an entry there plus one in
+      `pine/runners.py`, and a line in `OVERLAY_LAYERS` if the copilot should be able to chart it.
 - [ ] Only then merge.
 
 ## Test standards

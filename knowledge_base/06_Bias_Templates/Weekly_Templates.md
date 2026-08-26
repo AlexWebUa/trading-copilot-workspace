@@ -2,9 +2,9 @@
 title: Недельные шаблоны (Weekly Templates)
 tags: [bias, weekly, templates, ict, fundamental]
 aliases: [Weekly Templates, ICT Weekly Templates, Weekly Profiles, Недельные шаблоны]
-sources: [raw_notion/ICT_Weekly_Templates.md, raw_notion/Weekly_Profiles.md]
+sources: [raw_notion/ICT_Weekly_Templates.md, raw_notion/Weekly_Profiles.md, course-archiver/output/DT_MATERIAL_50/sessions-2/notion_2.md]
 status: defined
-updated: 2026-04-18
+updated: 2026-08-05
 ---
 
 # Недельные шаблоны (Weekly Templates)

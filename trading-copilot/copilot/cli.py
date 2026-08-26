@@ -5,11 +5,18 @@ Usage:
     python -m copilot
     python -m copilot --symbol ETHUSDT
     python -m copilot --symbol BTCUSDT --verbose
+    python -m copilot --backend cli        # bill the Claude plan, not the API
+    python -m copilot --market spot       # spot-only listings (QQQBUSDT, some commodities)
 
 REPL commands:
     analyze [query]                        — run a full analysis
     switch <SYMBOL>                        — change active symbol
     model <name>                           — change LLM model
+    backend [api|cli]                      — api = Messages API (usage billing),
+                                             cli = Claude Code CLI (plan limits)
+    market [futures|spot]                  — Binance market the detectors read.
+                                             futures = fapi perpetuals (default),
+                                             spot = api.binance.com
     verbose                                — toggle verbose tool logging
     history                                — show last 10 saved reports
     read <N>                               — read report #N from history list
@@ -43,6 +50,7 @@ import argparse
 import logging
 import shlex
 import os
+import shutil
 import sys
 
 logger = logging.getLogger(__name__)
@@ -296,8 +304,12 @@ def _journal_path() -> Path | None:
 def _all_rules() -> dict:
     """Return all available rules: builtin + orderflow."""
     from copilot.backtest.rules import BUILTIN_RULES
+    from copilot.backtest.rules_bellissimo import BELLISSIMO_RULES
     from copilot.backtest.rules_orderflow import ORDERFLOW_RULES
-    return {**BUILTIN_RULES, **ORDERFLOW_RULES}
+
+    # The 12 synthetic rules stay runnable but are OUT of the strategy research
+    # set (docs/RESEARCH_PROTOCOL.md § 2.6) — they encode nobody's methodology.
+    return {**BUILTIN_RULES, **ORDERFLOW_RULES, **BELLISSIMO_RULES}
 
 
 def _do_backtest(rest: str, default_symbol: str) -> None:
@@ -332,7 +344,19 @@ def _do_backtest(rest: str, default_symbol: str) -> None:
 
     if args.list_rules:
         from copilot.backtest.rules_orderflow import ORDERFLOW_GROUPS
-        print("  Built-in SMC rules:")
+        from copilot.backtest.rules_bellissimo import BELLISSIMO_RULES
+
+        print("  Trader's setups (the strategy research set):")
+        for name, rule in BELLISSIMO_RULES.items():
+            n_cond = len(rule.conditions) + len(rule.entry_conditions)
+            print(
+                f"    {name:<34} {rule.direction:<5}  {n_cond} conditions  "
+                f"sl={rule.sl_logic}  tp={rule.tp_logic}  min_rr={rule.min_rr}"
+            )
+
+        print("\n  Synthetic rules — NOT part of the strategy research")
+        print("  (kept runnable; they encode nobody's methodology)")
+        print("\n  Built-in SMC rules:")
         from copilot.backtest.rules import BUILTIN_RULES
         for name, rule in BUILTIN_RULES.items():
             n_cond = len(rule.conditions)
@@ -503,28 +527,60 @@ def _do_compare(rest: str, default_symbol: str) -> None:
             print()
 
 
-def _check_api_key() -> None:
+def _apply_market(market: str) -> None:
+    """Publish the chosen market to every consumer.
+
+    The env var is the only channel that reaches all of them: the in-process
+    `ToolRegistry` builds its own `BinanceSource()`, and under the cli backend
+    the detectors run inside the MCP server that `claude` spawns as a
+    grandchild process — nothing can be passed to it by argument.
+    """
+    os.environ["COPILOT_MARKET"] = market
+
+
+def _backend_problem(backend: str) -> str | None:
+    """Return why `backend` can't run, or None if it's usable.
+
+    Returned rather than exited on so the REPL's `backend` command can reject a
+    switch without killing the session.
+    """
+    if backend == "cli":
+        if shutil.which(os.getenv("COPILOT_CLAUDE_BIN", "claude")) is None:
+            return (
+                "the `claude` CLI was not found on PATH. Install Claude Code "
+                "(https://claude.com/claude-code), set COPILOT_CLAUDE_BIN, "
+                "or use the api backend."
+            )
+        return None
     if not os.getenv("ANTHROPIC_API_KEY"):
-        print(
-            "Error: ANTHROPIC_API_KEY not set. "
-            "Copy .env.example to .env and add your key.",
-            file=sys.stderr,
+        return (
+            "ANTHROPIC_API_KEY not set. Copy .env.example to .env and add your key, "
+            "or use --backend cli to bill the Claude subscription plan instead."
         )
-        sys.exit(1)
+    return None
 
 
 def main() -> None:
-    _check_api_key()
-
     parser = argparse.ArgumentParser(description="Trading Co-Pilot REPL")
     parser.add_argument("--symbol", default=None, help="Starting symbol (e.g. BTCUSDT)")
     parser.add_argument("--model", default=None, help="Claude model ID")
+    parser.add_argument(
+        "--backend", default=None, choices=["api", "cli"],
+        help="api = Anthropic Messages API (usage-based billing); "
+             "cli = Claude Code CLI over MCP (subscription plan limits)",
+    )
+    parser.add_argument(
+        "--market", default=None, choices=["futures", "spot"],
+        help="Binance market to read: futures = USD-M perpetuals (default); "
+             "spot = api.binance.com, needed for spot-only listings such as QQQBUSDT",
+    )
     parser.add_argument("--verbose", action="store_true", help="Show tool calls")
     args = parser.parse_args()
 
     # Lazy imports (keep startup fast)
     from copilot.session import Session
-    from copilot.llm.agent import TradingAgent
+    from copilot.data.binance import resolve_market
+    from copilot.llm.backend import build_agent, resolve_backend
     from copilot.llm.report import list_recent_reports, read_report
     from copilot.detectors.sessions import current_killzone
 
@@ -536,15 +592,39 @@ def main() -> None:
     if args.verbose:
         session.verbose = True
 
-    agent = TradingAgent(
-        symbol=session.symbol,
-        model=session.model,
-    )
+    # Precedence: --backend > COPILOT_BACKEND > persisted session > "api".
+    try:
+        session.backend = resolve_backend(
+            args.backend or os.getenv("COPILOT_BACKEND") or session.backend
+        )
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    if problem := _backend_problem(session.backend):
+        print(f"Error: {problem}", file=sys.stderr)
+        sys.exit(1)
+
+    # Precedence: --market > COPILOT_MARKET > persisted session > "futures".
+    try:
+        session.market = resolve_market(
+            args.market or os.getenv("COPILOT_MARKET") or session.market
+        )
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+    _apply_market(session.market)
+
+    agent = build_agent(session.symbol, session.model, session.backend)
 
     ctx = current_killzone()
     print(f"\n Trading Co-Pilot")
     print(f" Symbol : {session.symbol}")
     print(f" Model  : {session.model}")
+    print(f" Backend: {session.backend}"
+          f"{' (Claude Code CLI — plan limits)' if session.backend == 'cli' else ' (Messages API — usage billing)'}")
+    print(f" Market : {session.market}"
+          f"{' (api.binance.com)' if session.market == 'spot' else ' (USD-M perpetuals)'}")
     print(f" Time   : {ctx['kyiv_time']} Kyiv ({ctx['weekday']})")
     kz = ctx.get("active_killzone") or ctx.get("next_killzone", "—")
     print(f" KZ     : {kz}")
@@ -577,6 +657,8 @@ def main() -> None:
         elif cmd == "session":
             print(f"  symbol   : {session.symbol}")
             print(f"  model    : {session.model}")
+            print(f"  backend  : {session.backend}")
+            print(f"  market   : {session.market}")
             print(f"  verbose  : {session.verbose}")
 
         elif cmd == "verbose":
@@ -589,7 +671,7 @@ def main() -> None:
             else:
                 new_sym = rest.upper()
                 session.symbol = new_sym
-                agent = TradingAgent(symbol=new_sym, model=session.model)
+                agent = build_agent(new_sym, session.model, session.backend)
                 print(f"  Switched to {new_sym}. Conversation reset.")
 
         elif cmd == "model":
@@ -597,8 +679,45 @@ def main() -> None:
                 print(f"  Current model: {session.model}")
             else:
                 session.model = rest.strip()
-                agent = TradingAgent(symbol=session.symbol, model=session.model)
+                agent = build_agent(session.symbol, session.model, session.backend)
                 print(f"  Model set to {session.model}. Conversation reset.")
+
+        elif cmd == "backend":
+            if not rest:
+                print(f"  Current backend: {session.backend}")
+                print("  Usage: backend [api|cli]   "
+                      "(api = Messages API billing, cli = subscription plan)")
+            else:
+                try:
+                    new_backend = resolve_backend(rest.strip())
+                except ValueError as e:
+                    print(f"  {e}")
+                else:
+                    if problem := _backend_problem(new_backend):
+                        print(f"  Cannot switch: {problem}")
+                    else:
+                        session.backend = new_backend
+                        agent = build_agent(session.symbol, session.model, new_backend)
+                        print(f"  Backend set to {new_backend}. Conversation reset.")
+
+        elif cmd == "market":
+            if not rest:
+                print(f"  Current market: {session.market}")
+                print("  Usage: market [futures|spot]   "
+                      "(spot is needed for spot-only listings, e.g. QQQBUSDT)")
+            else:
+                try:
+                    new_market = resolve_market(rest.strip())
+                except ValueError as e:
+                    print(f"  {e}")
+                else:
+                    session.market = new_market
+                    _apply_market(new_market)
+                    # The registry caches detector results per source_id, and the
+                    # agent holds the registry — rebuild both so nothing from the
+                    # previous market survives the switch.
+                    agent = build_agent(session.symbol, session.model, session.backend)
+                    print(f"  Market set to {new_market}. Conversation reset.")
 
         elif cmd == "history":
             reports = list_recent_reports(10)

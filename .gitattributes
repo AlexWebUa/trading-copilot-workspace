@@ -1,0 +1,21 @@
+# Line endings. The project moves between Linux and Windows checkouts, and two
+# files (llm/agent.py, llm/prompts.py) already carried CRLF from an earlier
+# Windows life — enough to produce whole-file diffs on every platform switch.
+#
+# Normalise text to LF in the repository; Git converts on checkout per platform.
+* text=auto
+
+# Shell scripts must keep LF even on a Windows checkout — CRLF breaks the
+# shebang line ("bad interpreter: /usr/bin/env bash\r").
+*.sh text eol=lf
+
+# Batch files are the mirror image: cmd.exe needs CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Binary payloads Git must not touch.
+*.parquet binary
+*.png binary
+*.jpg binary
+*.pdf binary

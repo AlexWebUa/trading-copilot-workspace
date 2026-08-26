@@ -25,6 +25,8 @@ TradingView-индикатор от команды **Dark Trader** для раб
 - **History Mode** — отображение исторических сессий и пулов ликвидности.
 - Ручная установка времени сессий и часового пояса.
 
+> Есть сестринский продукт — **Dark Trader Forex Sessions Indicator** (автор Blinchikof), аналогичный, но для Forex (не индексов); дополнительно показывает **NYM (New York Midnight)**. Не создана отдельная заметка — описание продукта не несёт нового трейдинг-знания сверх уже здесь описанного функционала.
+
 ## Ссылки
 
 - TradingView: [Dark Trader Index Sessions Indicator](https://www.tradingview.com/script/9sbaCFvi-Dark-Trader-Index-Sessions-Indicator/)

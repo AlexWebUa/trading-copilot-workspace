@@ -2,9 +2,9 @@
 title: Fair Value Gap (FVG / Imbalance)
 tags: [tool, poi, concept]
 aliases: [FVG, Fair Value Gap, Imbalance, IMB, Ценовой дисбаланс]
-sources: [raw_notion/Fair_Value_Gap.md, raw_notion/4H1H30M_FVG_-_Как_с_ними_работать.md]
+sources: [raw_notion/Fair_Value_Gap.md, raw_notion/4H1H30M_FVG_-_Как_с_ними_работать.md, course-archiver/output/DT_MATERIAL_50/block-2/notion_2.md]
 status: defined
-updated: 2026-04-18
+updated: 2026-08-05
 ---
 
 # Fair Value Gap (FVG / Imbalance)
@@ -68,6 +68,12 @@ FVG **существует только тогда, когда фитили пе
 
 - [[IFVG]] — инверсный FVG (прошитый, сменивший функцию).
 - [[BPR]] — Balanced Price Range (пересечение двух FVG).
+- [[Volume_Imbalance]] — двухсвечной вариант, тени могут пересекаться.
+- [[Implied_Imbalance]] — трёхсвечной вариант, импульс перекрыт фитилями с обеих сторон.
+
+## Микроструктурное объяснение (почему FVG вообще формируется)
+
+FVG — не абстрактная геометрия, а следствие поглощения лимитной ликвидности крупным маркет-ордером/потоком: когда объём пробивает самые «густые» уровни книги вокруг спреда, дальше почти нет сопротивления вплоть до следующей плотной зоны ликвидности (sell/buy wall) — пройденный без сделок диапазон и есть FVG. Тест FVG после формирования часто объясняется механикой Pegged/Tracking-алгоритмов, подтягивающих лимитные ордера за расширившимся спредом. Подробнее — [[../12_Market_Mechanics/Market_Microstructure]], [[../12_Market_Mechanics/Execution_Algorithms]].
 
 ## Связанные заметки
 
@@ -76,4 +82,5 @@ FVG **существует только тогда, когда фитили пе
 - [[IFVG]] · [[BPR]]
 - [[../07_POI/POI]] — FVG как тип POI
 - [[../01_Concepts/Context_Determination]] — синхронизация ТФ
+- [[../12_Market_Mechanics/Market_Microstructure]] — микроструктурная механика формирования/теста FVG
 - [[../99_Glossary/Glossary#F|Глоссарий: FVG]]

@@ -2,9 +2,9 @@
 title: Sponsored Candle (SC)
 tags: [tool, poi]
 aliases: [SC, Sponsored Candle, Sponsor Candle, Sponsorship Candle, Спонсированная свеча]
-sources: [raw_notion/Sponsorsponsorshipsponsored_candle.md]
+sources: [raw_notion/Sponsorsponsorshipsponsored_candle.md, course-archiver/output/DT_MATERIAL_50/block-3/notion_2.md]
 status: defined
-updated: 2026-04-18
+updated: 2026-08-05
 ---
 
 # Sponsored Candle (SC)

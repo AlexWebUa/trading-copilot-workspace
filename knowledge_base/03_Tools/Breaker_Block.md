@@ -2,9 +2,9 @@
 title: Breaker Block (BB)
 tags: [tool, poi]
 aliases: [BB, Breaker Block, Брейкер-блок]
-sources: [raw_notion/Breaker_Block.md]
+sources: [raw_notion/Breaker_Block.md, course-archiver/output/DT_MATERIAL_50/block-3/notion_4.md]
 status: defined
-updated: 2026-04-18
+updated: 2026-08-05
 ---
 
 # Breaker Block (BB)

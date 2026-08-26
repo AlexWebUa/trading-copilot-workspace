@@ -1,57 +1,53 @@
 """
-Pine Script v5 generator — B&W Design System v2.
+Pine Script v5 generator — merged overlay for the detectors the analysis
+actually leaned on.
 
-Runs all Tier A + B detectors on the provided DataFrame and emits a
-ready-to-paste Pine Script overlay indicator that draws every detected zone
-on the user's TradingView chart.
+Before Aug 2026 this module hard-coded nine detectors and charted all of them
+on every call, regardless of what drove the verdict. It now takes a `detectors`
+list: the LLM passes the ones that materially supported its conclusion (the HTF
+POI's source, the pools cited under Levels, the structure detector), and only
+those become layers. Everything else — the drawing code and how each detector is
+invoked — lives in `copilot/pine/`, shared with `scripts/debug_detectors.py`.
 
-Usage (MCP / CLI):
-  1. Call generate_pine_script(symbol="BTCUSDT", timeframe="1h")
-  2. Copy the returned `pine_script` string into TradingView:
-     Pine Script Editor → New script → paste → "Add to chart"
-  3. All zones appear immediately. Zones extend `future_bars` bars to the right
-     so they're visible at the current price.
+The function stays **pure** (DataFrame in, dict out, no I/O) per the detector
+contract in docs/CONVENTIONS.md. Writing the .pine file is the registry's job:
+`llm/tools.py` `_ARTIFACT_TOOLS` swaps the `pine_script` string for a
+`pine_file` path, so hundreds of Pine lines never enter the model's context.
 
-Zone visual style (B&W preset):
-  #f7525f 15% fill          = FVG  (+ solid red center line)
-  #f7525f 15% + dashed border = IFVG (dashed distinguishes from FVG)
-  #4a4a4a 15% fill          = All blocks (OB/BB/MB/RB) — active
-  #4a4a4a 5%  fill          = All blocks — mitigated (stays visible)
-  #000 solid 2px            = BOS  (break of structure, continuation)
-  #000 solid 1px            = cBOS (structural reversal)
-  #000 dashed 1px           = Liquidity unswept (BSL / SSL)
-  #000 solid 1px + ✕ label  = Liquidity swept
-  #f7525f bars (right panel) = VP POC bar
-  #4a4a4a bars (right panel) = VP HVN / LVN bars
+Usage:
+  1. generate_pine_script(symbol="BTCUSDT", timeframe="1h",
+                          detectors=["detect_liquidity", "detect_fvg"])
+  2. Open the returned pine_file, paste into TradingView:
+     Pine Script Editor → New script → paste → Save → Add to chart.
+  3. Each detector is a separate toggle in the indicator's settings panel.
+
+Zone visual style (B&W preset) is documented in copilot/pine/emitters.py.
 """
 
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
 
 import pandas as pd
 
-from copilot.detectors.bos import detect_bos
-from copilot.detectors.breaker_block import detect_breaker_block
-from copilot.detectors.fvg import detect_fvg
-from copilot.detectors.ifvg import detect_ifvg
-from copilot.detectors.liquidity import detect_liquidity
-from copilot.detectors.mitigation_block import detect_mitigation_block
-from copilot.detectors.order_block import detect_order_block
-from copilot.detectors.rejection_block import detect_rejection_block
-from copilot.detectors.volume_profile import detect_volume_profile
+from copilot.pine.emitters import EmitContext
+from copilot.pine.overlay import OVERLAY_LAYERS, build_overlay
+from copilot.pine.runners import RunDeps, run as run_detector
 
 TOOL_SCHEMA = {
     "name": "generate_pine_script",
     "description": (
-        "Run all detectors and generate a Pine Script v5 overlay indicator "
-        "that draws every detected zone (FVGs, OBs, IFVGs, Breakers, Mitigation Blocks, "
-        "Rejection Blocks, liquidity levels, BOS markers, Volume Profile) on a TradingView "
-        "chart using the B&W design system. "
-        "Returns the full Pine Script code as a string. "
-        "Paste it into TradingView → Pine Script Editor → New script → Add to chart. "
-        "Use at the end of any analysis to give the trader a visual summary."
+        "Generate a Pine Script v5 overlay indicator for TradingView from the detectors "
+        "you consider SIGNIFICANT for this analysis, and save it to disk. "
+        "Pass in `detectors` ONLY the ones that materially drove your verdict: the detector "
+        "that produced the HTF POI, the one behind each level in the Levels table, and the "
+        "structure detector you based the bias on. Do NOT pass detectors that returned nothing, "
+        "or that you checked and then discarded — an overlay of everything is noise on the chart. "
+        "One call charts one timeframe; call it a second time only if the HTF POI came from a "
+        "different timeframe than the execution one. "
+        "Returns the saved file path (pine_file) plus per-layer object counts — the script text "
+        "itself is written to disk, not returned. Call this at the very end, after the analysis "
+        "is settled, and cite pine_file in the Chart section of the report."
     ),
     "input_schema": {
         "type": "object",
@@ -61,13 +57,21 @@ TOOL_SCHEMA = {
                 "type": "string",
                 "enum": ["1m", "3m", "5m", "15m", "1h", "4h", "1d"],
             },
+            "detectors": {
+                "type": "array",
+                "items": {"type": "string", "enum": list(OVERLAY_LAYERS)},
+                "description": (
+                    "Detectors to chart as layers — only the significant ones. "
+                    "Omit to chart all supported layers (rarely what you want)."
+                ),
+            },
             "future_bars": {
                 "type": "integer",
                 "default": 50,
                 "description": "How many bars to the right zone boxes extend (default 50)",
             },
         },
-        "required": ["symbol", "timeframe"],
+        "required": ["symbol", "timeframe", "detectors"],
     },
 }
 
@@ -76,558 +80,65 @@ def generate_pine_script(
     df: pd.DataFrame,
     symbol: str = "UNKNOWN",
     timeframe: str = "?",
+    detectors: list[str] | None = None,
     future_bars: int = 50,
 ) -> dict:
-    """Run all detectors and emit a Pine Script v5 overlay (B&W design system)."""
+    """Chart the requested detectors as one Pine v5 overlay.
 
-    # ── Run detectors in parallel ────────────────────────────────────────────
-    _detector_tasks = {
-        "fvgs":        detect_fvg,
-        "obs":         detect_order_block,
-        "liq":         detect_liquidity,
-        "bos":         detect_bos,
-        "ifvgs":       detect_ifvg,
-        "breakers":    detect_breaker_block,
-        "rejections":  detect_rejection_block,
-        "mitigations": detect_mitigation_block,
-        "vp":          detect_volume_profile,
-    }
-    with ThreadPoolExecutor(max_workers=len(_detector_tasks)) as _ex:
-        _futures = {k: _ex.submit(fn, df) for k, fn in _detector_tasks.items()}
-        _results = {k: f.result(timeout=30) for k, f in _futures.items()}
+    Fails soft: an unsupported detector name returns an error dict naming the
+    valid layers rather than raising, so a mistaken LLM argument costs one turn
+    instead of aborting the analysis.
+    """
+    selected = list(OVERLAY_LAYERS) if detectors is None else list(dict.fromkeys(detectors))
 
-    fvgs        = _results["fvgs"]
-    obs         = _results["obs"]
-    liq         = _results["liq"]
-    bos         = _results["bos"]
-    ifvgs       = _results["ifvgs"]
-    breakers    = _results["breakers"]
-    rejections  = _results["rejections"]
-    mitigations = _results["mitigations"]
-    vp          = _results["vp"]
+    unknown = [d for d in selected if d not in OVERLAY_LAYERS]
+    if unknown:
+        return {
+            "status": "error",
+            "error": (
+                f"Unsupported detector(s) for charting: {', '.join(unknown)}. "
+                f"Supported layers: {', '.join(OVERLAY_LAYERS)}."
+            ),
+            "supported_layers": list(OVERLAY_LAYERS),
+        }
+    if not selected:
+        return {
+            "status": "error",
+            "error": "No detectors requested — pass the ones that drove the analysis.",
+            "supported_layers": list(OVERLAY_LAYERS),
+        }
 
-    # ── Compute TF bar duration for sweep / BOS age calculation ─────────────
-    tf_seconds = float((df.index[1] - df.index[0]).total_seconds()) if len(df) > 1 else 3600.0
+    ctx = EmitContext(df=df, bars=len(df), future_bars=future_bars, ltf=timeframe)
+    deps = RunDeps()
 
-    now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    lines: list[str] = []
+    # detect_fib_zones needs the swing pair from market structure; compute it
+    # once here instead of letting the runner recompute it per call.
+    if "detect_fib_zones" in selected:
+        deps.ltf_ms = run_detector("detect_market_structure", ctx)
 
-    # ── Header ───────────────────────────────────────────────────────────────
-    lines += [
-        f"// Generated by Trading Co-Pilot — {symbol} {timeframe} — {now_str}",
-        "//@version=5",
-        f'indicator("Co-Pilot: {symbol} {timeframe}", overlay=true, '
-        "max_boxes_count=500, max_lines_count=500, max_labels_count=500)",
-        "",
-        "// ── Design system — B&W preset ───────────────────────────────────────────────",
-        "c_fvg_fill     = color.new(#f7525f, 85)   // FVG fill (15% opacity)",
-        "c_fvg_line     = color.new(#f7525f,  0)   // FVG center line + IFVG border",
-        "c_block_active = color.new(#4a4a4a, 85)   // Blocks active (15%)",
-        "c_block_mit    = color.new(#4a4a4a, 95)   // Blocks mitigated (5%)",
-        "c_structure    = color.new(#000000,  0)   // BOS, cBOS, liquidity",
-        "c_vp_hvn       = color.new(#4a4a4a, 40)   // VP HVN bars (60% opacity)",
-        "c_vp_lvn       = color.new(#4a4a4a, 80)   // VP LVN bars (20% opacity)",
-        "c_vp_poc       = color.new(#f7525f, 35)   // VP POC bar  (65% opacity)",
-        "",
-        "// ── Script parameters ─────────────────────────────────────────────────────────",
-        'show_labels      = input.bool(true,  "Show labels")',
-        'show_swing_debug = input.bool(false, "Debug: swing markers")',
-        'show_mitigated   = input.bool(true,  "Show mitigated blocks")',
-        'show_vp          = input.bool(true,  "Show Volume Profile")',
-        "",
-    ]
-
-    # ── alertcondition() calls — run on every bar (outside barstate.islast) ──
-    _alert_lines: list[str] = ["// ── Alert conditions ──────────────────────────────────────────────"]
-    _alert_count = 0
-
-    for pool in liq.get("buyside_liquidity", [])[:5]:
-        lvl = pool.get("price")
-        if lvl is None:
-            continue
-        _alert_lines.append(
-            f'alertcondition(ta.crossover(high, {lvl}), "BSL Sweep {lvl}", "Price swept BSL at {lvl}")'
-        )
-        _alert_count += 1
-
-    for pool in liq.get("sellside_liquidity", [])[:5]:
-        lvl = pool.get("price")
-        if lvl is None:
-            continue
-        _alert_lines.append(
-            f'alertcondition(ta.crossunder(low, {lvl}), "SSL Sweep {lvl}", "Price swept SSL at {lvl}")'
-        )
-        _alert_count += 1
-
-    for z in fvgs.get("fvgs", []):
-        if z.get("fill_state", "untouched") != "untouched":
-            continue
-        top   = z["upper"]
-        bot   = z["lower"]
-        ztype = z["type"]
-        arrow = "↑" if ztype == "bullish" else "↓"
-        _alert_lines.append(
-            f'alertcondition(close >= {bot} and close <= {top}, '
-            f'"FVG{arrow} Entry {bot}", "Price entered {ztype} FVG {bot}-{top}")'
-        )
-        _alert_count += 1
-
-    for ob in obs.get("obs", []):
-        if ob.get("is_mitigated"):
-            continue
-        top = ob.get("high")
-        bot = ob.get("low")
-        if top is None or bot is None:
-            continue
-        ztype = ob.get("type", "")
-        arrow = "↑" if ztype == "bullish" else "↓"
-        _alert_lines.append(
-            f'alertcondition(close >= {bot} and close <= {top}, '
-            f'"OB{arrow} Touch {bot}", "Price touched {ztype} OB {bot}-{top}")'
-        )
-        _alert_count += 1
-
-    poc = vp.get("poc")
-    vah = vp.get("vah")
-    val = vp.get("val")
-    if poc:
-        _alert_lines.append(
-            f'alertcondition(ta.cross(close, {poc}), "POC Cross {poc}", "Price crossed POC at {poc}")'
-        )
-        _alert_count += 1
-    if vah:
-        _alert_lines.append(
-            f'alertcondition(ta.cross(close, {vah}), "VAH Cross {vah}", "Price crossed VAH at {vah}")'
-        )
-        _alert_count += 1
-    if val:
-        _alert_lines.append(
-            f'alertcondition(ta.cross(close, {val}), "VAL Cross {val}", "Price crossed VAL at {val}")'
-        )
-        _alert_count += 1
-
-    if _alert_count > 0:
-        lines += _alert_lines
-        lines.append("")
-
-    lines.append("if barstate.islast")
-
-    zone_count = 0
-
-    # ── Fair Value Gaps ───────────────────────────────────────────────────────
-    fvg_list = fvgs.get("fvgs", [])
-    if fvg_list:
-        lines.append("    // FVGs — #f7525f fill, center line, no border")
-        for z in fvg_list:
-            age   = max(1, int(z["age_bars"]))
-            top   = z["upper"]
-            bot   = z["lower"]
-            mid   = round((top + bot) / 2, 2)
-            ztype = z["type"]
-            state = z.get("fill_state", "untouched")
-            arrow = "↑" if ztype == "bullish" else "↓"
-            # Box: fill only, transparent border
-            lines.append(
-                f'    box.new(bar_index-{age}, {top}, bar_index+{future_bars}, {bot}, '
-                f'bgcolor=c_fvg_fill, border_color=color.new(color.white, 100))'
-            )
-            # Center line (solid red — distinguishes FVG from IFVG)
-            lines.append(
-                f'    line.new(bar_index-{age}, {mid}, bar_index+{future_bars}, {mid}, '
-                f'color=c_fvg_line, style=line.style_solid, width=1)'
-            )
-            # Label — guarded by show_labels
-            lines.append(f'    if show_labels')
-            lines.append(
-                f'        label.new(bar_index-{age}+1, {top}, "FVG{arrow} {state}", '
-                f'color=color.new(color.white, 100), textcolor=color.black, '
-                f'style=label.style_none, size=size.tiny)'
-            )
-            zone_count += 1
-
-    # ── Inverted FVGs ─────────────────────────────────────────────────────────
-    ifvg_list = ifvgs.get("ifvgs", [])
-    if ifvg_list:
-        lines.append("    // IFVGs — same fill as FVG, dashed border, NO center line")
-        for z in ifvg_list:
-            age    = max(1, int(z["age_bars"]))
-            top    = z["upper"]
-            bot    = z["lower"]
-            ztype  = z["type"]
-            tested = "tested" if z["is_tested"] else "untested"
-            arrow  = "↑" if ztype == "bullish" else "↓"
-            # Dashed border distinguishes IFVG from FVG (no center line here)
-            lines.append(
-                f'    box.new(bar_index-{age}, {top}, bar_index+{future_bars}, {bot}, '
-                f'bgcolor=c_fvg_fill, border_color=c_fvg_line, '
-                f'border_style=line.style_dashed, border_width=1)'
-            )
-            lines.append(f'    if show_labels')
-            lines.append(
-                f'        label.new(bar_index-{age}+1, {top}, "IFVG{arrow} {tested}", '
-                f'color=color.new(color.white, 100), textcolor=color.black, '
-                f'style=label.style_none, size=size.tiny)'
-            )
-            zone_count += 1
-
-    # ── Order Blocks ──────────────────────────────────────────────────────────
-    ob_list = obs.get("obs", [])
-    if ob_list:
-        lines.append("    // Order Blocks — #4a4a4a, active 15% / mitigated 5%")
-        for z in ob_list:
-            age     = max(1, int(z["age_bars"]))
-            top     = z["high"]
-            bot     = z["low"]
-            ztype   = z["type"]
-            mit     = z.get("is_mitigated", False)
-            fvg_tag = "+FVG" if z.get("has_fvg_after") else ""
-            arrow   = "↑" if ztype == "bullish" else "↓"
-            label   = f"OB{arrow}{fvg_tag}"
-            if mit:
-                lines.append(f'    if show_mitigated')
-                lines.append(
-                    f'        box.new(bar_index-{age}, {top}, bar_index, {bot}, '
-                    f'bgcolor=c_block_mit, border_color=color.new(color.white, 100))'
-                )
-                lines.append(f'        if show_labels')
-                lines.append(
-                    f'            label.new(bar_index-{age}+1, {top}, "{label} mit", '
-                    f'color=color.new(color.white, 100), textcolor=color.black, '
-                    f'style=label.style_none, size=size.tiny)'
-                )
-            else:
-                lines.append(
-                    f'    box.new(bar_index-{age}, {top}, bar_index+{future_bars}, {bot}, '
-                    f'bgcolor=c_block_active, border_color=color.new(color.white, 100))'
-                )
-                lines.append(f'    if show_labels')
-                lines.append(
-                    f'        label.new(bar_index-{age}+1, {top}, "{label}", '
-                    f'color=color.new(color.white, 100), textcolor=color.black, '
-                    f'style=label.style_none, size=size.tiny)'
-                )
-            zone_count += 1
-
-    # ── Breaker Blocks ────────────────────────────────────────────────────────
-    brk_list = breakers.get("breakers", [])
-    if brk_list:
-        lines.append("    // Breaker Blocks — same colour scheme as OB")
-        for z in brk_list:
-            age    = max(1, int(z["age_bars"]))
-            top    = z["high"]
-            bot    = z["low"]
-            ztype  = z["type"]
-            mit    = z.get("is_mitigated", False)
-            tested = " tested" if z.get("is_tested") else ""
-            arrow  = "↑" if ztype == "bullish" else "↓"
-            label  = f"BB{arrow}{tested}"
-            if mit:
-                lines.append(f'    if show_mitigated')
-                lines.append(
-                    f'        box.new(bar_index-{age}, {top}, bar_index, {bot}, '
-                    f'bgcolor=c_block_mit, border_color=color.new(color.white, 100))'
-                )
-                lines.append(f'        if show_labels')
-                lines.append(
-                    f'            label.new(bar_index-{age}+1, {top}, "{label} mit", '
-                    f'color=color.new(color.white, 100), textcolor=color.black, '
-                    f'style=label.style_none, size=size.tiny)'
-                )
-            else:
-                lines.append(
-                    f'    box.new(bar_index-{age}, {top}, bar_index+{future_bars}, {bot}, '
-                    f'bgcolor=c_block_active, border_color=color.new(color.white, 100))'
-                )
-                lines.append(f'    if show_labels')
-                lines.append(
-                    f'        label.new(bar_index-{age}+1, {top}, "{label}", '
-                    f'color=color.new(color.white, 100), textcolor=color.black, '
-                    f'style=label.style_none, size=size.tiny)'
-                )
-            zone_count += 1
-
-    # ── Mitigation Blocks ─────────────────────────────────────────────────────
-    mit_list = mitigations.get("blocks", [])
-    if mit_list:
-        lines.append("    // Mitigation Blocks")
-        for z in mit_list:
-            age   = max(1, int(z["age_bars"]))
-            top   = z["high"]
-            bot   = z["low"]
-            ztype = z["type"]
-            mit   = z.get("is_mitigated", False)
-            arrow = "↑" if ztype == "bullish" else "↓"
-            label = f"MB{arrow}"
-            if mit:
-                lines.append(f'    if show_mitigated')
-                lines.append(
-                    f'        box.new(bar_index-{age}, {top}, bar_index, {bot}, '
-                    f'bgcolor=c_block_mit, border_color=color.new(color.white, 100))'
-                )
-                lines.append(f'        if show_labels')
-                lines.append(
-                    f'            label.new(bar_index-{age}+1, {top}, "{label} mit", '
-                    f'color=color.new(color.white, 100), textcolor=color.black, '
-                    f'style=label.style_none, size=size.tiny)'
-                )
-            else:
-                lines.append(
-                    f'    box.new(bar_index-{age}, {top}, bar_index+{future_bars}, {bot}, '
-                    f'bgcolor=c_block_active, border_color=color.new(color.white, 100))'
-                )
-                lines.append(f'    if show_labels')
-                lines.append(
-                    f'        label.new(bar_index-{age}+1, {top}, "{label}", '
-                    f'color=color.new(color.white, 100), textcolor=color.black, '
-                    f'style=label.style_none, size=size.tiny)'
-                )
-            zone_count += 1
-
-    # ── Rejection Blocks ──────────────────────────────────────────────────────
-    rej_list = rejections.get("blocks", [])
-    if rej_list:
-        lines.append("    // Rejection Blocks")
-        for z in rej_list:
-            age   = max(1, int(z["age_bars"]))
-            top   = z["high"]
-            bot   = z["low"]
-            ztype = z["type"]
-            mit   = z.get("is_mitigated", False)
-            arrow = "↑" if ztype == "bullish" else "↓"
-            label = f"RB{arrow}"
-            if mit:
-                lines.append(f'    if show_mitigated')
-                lines.append(
-                    f'        box.new(bar_index-{age}, {top}, bar_index, {bot}, '
-                    f'bgcolor=c_block_mit, border_color=color.new(color.white, 100))'
-                )
-                lines.append(f'        if show_labels')
-                lines.append(
-                    f'            label.new(bar_index-{age}+1, {top}, "{label} mit", '
-                    f'color=color.new(color.white, 100), textcolor=color.black, '
-                    f'style=label.style_none, size=size.tiny)'
-                )
-            else:
-                lines.append(
-                    f'    box.new(bar_index-{age}, {top}, bar_index+{future_bars}, {bot}, '
-                    f'bgcolor=c_block_active, border_color=color.new(color.white, 100))'
-                )
-                lines.append(f'    if show_labels')
-                lines.append(
-                    f'        label.new(bar_index-{age}+1, {top}, "{label}", '
-                    f'color=color.new(color.white, 100), textcolor=color.black, '
-                    f'style=label.style_none, size=size.tiny)'
-                )
-            zone_count += 1
-
-    # ── Liquidity — Unswept pools ─────────────────────────────────────────────
-    bsl = liq.get("buyside_liquidity", [])
-    ssl = liq.get("sellside_liquidity", [])
-    if bsl or ssl:
-        lines.append("    // Liquidity — unswept pools (dashed black line)")
-        for pool in bsl:
-            age   = max(1, int(pool["age_bars"]))
-            price = pool["price"]
-            lines.append(
-                f'    line.new(bar_index-{age}, {price}, bar_index+{future_bars}, {price}, '
-                f'color=c_structure, style=line.style_dashed, width=1)'
-            )
-            lines.append(f'    if show_labels')
-            lines.append(
-                f'        label.new(bar_index-{age}+1, {price}, "BSL {price}", '
-                f'color=color.new(color.white, 100), textcolor=color.black, '
-                f'style=label.style_none, size=size.tiny)'
-            )
-            zone_count += 1
-        for pool in ssl:
-            age   = max(1, int(pool["age_bars"]))
-            price = pool["price"]
-            lines.append(
-                f'    line.new(bar_index-{age}, {price}, bar_index+{future_bars}, {price}, '
-                f'color=c_structure, style=line.style_dashed, width=1)'
-            )
-            lines.append(f'    if show_labels')
-            lines.append(
-                f'        label.new(bar_index-{age}+1, {price}, "SSL {price}", '
-                f'color=color.new(color.white, 100), textcolor=color.black, '
-                f'style=label.style_none, size=size.tiny)'
-            )
-            zone_count += 1
-
-    # ── Liquidity — Confirmed sweeps ──────────────────────────────────────────
-    sweeps = liq.get("recent_sweeps", [])
-    if sweeps:
-        lines.append("    // Confirmed sweeps — solid line + ✕ marker")
-        for sweep in sweeps:
+    with ThreadPoolExecutor(max_workers=max(1, len(selected))) as ex:
+        futures = {name: ex.submit(run_detector, name, ctx, deps) for name in selected}
+        results: dict[str, dict] = {}
+        for name, fut in futures.items():
             try:
-                ts = pd.Timestamp(sweep["sweep_ts"])
-                if ts.tzinfo is None:
-                    ts = ts.tz_localize("UTC")
-                age_sweep = max(1, int((df.index[-1] - ts).total_seconds() / tf_seconds))
-            except Exception:
-                continue
-            # Approximate fractal age: sweep_bar + 10 bars back
-            age_level = age_sweep + 10
-            mid_age   = (age_level + age_sweep) // 2
-            price     = sweep["swept_level"]
-            side      = sweep["side"]
-            side_tag  = "BSL" if side == "buyside" else "SSL"
-            # Solid horizontal line from fractal to sweep bar
-            lines.append(
-                f'    line.new(bar_index-{age_level}, {price}, bar_index-{age_sweep}, {price}, '
-                f'color=c_structure, style=line.style_solid, width=1)'
-            )
-            # ✕ (✕) marker at midpoint
-            lines.append(
-                f'    label.new(bar_index-{mid_age}, {price}, "✕", '
-                f'color=color.new(color.white, 100), textcolor=color.black, '
-                f'style=label.style_none, size=size.small)'
-            )
-            lines.append(f'    if show_labels')
-            lines.append(
-                f'        label.new(bar_index-{age_level}+1, {price}, "{side_tag} swept", '
-                f'color=color.new(color.white, 100), textcolor=color.black, '
-                f'style=label.style_none, size=size.tiny)'
-            )
+                results[name] = fut.result(timeout=30)
+            except Exception as exc:  # a broken layer must not kill the chart
+                results[name] = {"status": "error", "error": str(exc)}
 
-    # ── BOS / cBOS — events-based ─────────────────────────────────────────────
-    bos_events = bos.get("events", [])
-    if bos_events:
-        lines.append("    // BOS / cBOS — horizontal level lines")
-        for ev in bos_events:
-            bos_type  = ev.get("type", "")
-            bos_dir   = ev.get("direction", "")
-            bos_level = ev.get("broken_level")
-            break_ts  = ev.get("break_ts")
-            if not bos_level or not break_ts:
-                continue
-            try:
-                ts = pd.Timestamp(break_ts)
-                if ts.tzinfo is None:
-                    ts = ts.tz_localize("UTC")
-                age_break = max(1, int((df.index[-1] - ts).total_seconds() / tf_seconds))
-            except Exception:
-                age_break = 5
-            # BOS = 2px (continuation), cBOS = 1px (reversal)
-            width     = 2 if bos_type == "BOS" else 1
-            # Left edge: approximate fractal location (break bar + 8 bars back)
-            age_left  = age_break + 8
-            arrow     = "↑" if bos_dir == "bullish" else "↓"
-            # Horizontal line from fractal level to break candle
-            lines.append(
-                f'    line.new(bar_index-{age_left}, {bos_level}, bar_index-{age_break}, {bos_level}, '
-                f'color=c_structure, style=line.style_solid, width={width})'
-            )
-            lines.append(f'    if show_labels')
-            lines.append(
-                f'        label.new(bar_index-{age_left}, {bos_level}, "{bos_type}{arrow}", '
-                f'color=color.new(color.white, 100), textcolor=color.black, '
-                f'style=label.style_none, size=size.tiny)'
-            )
-
-    # ── Volume Profile ────────────────────────────────────────────────────────
-    if vp.get("poc"):
-        poc_price = vp.get("poc")
-        vah_price = vp.get("vah")
-        val_price = vp.get("val")
-        hvn_nodes = vp.get("hvn_nodes", [])
-        lvn_nodes = vp.get("lvn_nodes", [])
-
-        # VP panel spans bar_index+vp_right-bar_w to bar_index+vp_right (right side)
-        vp_left  = future_bars - 5   # max bar width in bars
-        vp_right = future_bars       # right edge of panel
-
-        lines.append("    if show_vp")
-        lines.append("        // Volume Profile — horizontal bar chart on right side")
-
-        # POC dashed line spanning last 50 bars + future panel
-        if poc_price:
-            lines.append(
-                f'        line.new(bar_index-50, {poc_price}, bar_index+{vp_right}, {poc_price}, '
-                f'color=c_vp_poc, style=line.style_dashed, width=1)'
-            )
-            lines.append(f'        if show_labels')
-            lines.append(
-                f'            label.new(bar_index+{vp_right - 1}, {poc_price}, "POC {poc_price}", '
-                f'color=c_vp_poc, textcolor=color.white, '
-                f'style=label.style_label_left, size=size.tiny)'
-            )
-
-        # VAH / VAL dashed grey lines
-        for lvl, lbl in [(vah_price, "VAH"), (val_price, "VAL")]:
-            if lvl:
-                lines.append(
-                    f'        line.new(bar_index-50, {lvl}, bar_index+{vp_right}, {lvl}, '
-                    f'color=color.new(#888888, 40), style=line.style_dashed, width=1)'
-                )
-
-        # HVN bars — width proportional to volume_pct
-        for node in hvn_nodes[:8]:
-            p_h     = node.get("price_high")
-            p_l     = node.get("price_low")
-            vol_pct = node.get("volume_pct", 0)
-            if not p_h or not p_l:
-                continue
-            bar_w    = max(1, int((vol_pct / 100.0) * vp_left))
-            is_poc   = (p_l <= poc_price <= p_h) if poc_price else False
-            bar_col  = "c_vp_poc" if is_poc else "c_vp_hvn"
-            lines.append(
-                f'        box.new(bar_index+{vp_right - bar_w}, {p_h}, bar_index+{vp_right}, {p_l}, '
-                f'bgcolor={bar_col}, border_color=color.new(color.white, 100))'
-            )
-
-        # LVN bars
-        for node in lvn_nodes[:5]:
-            p_h     = node.get("price_high")
-            p_l     = node.get("price_low")
-            vol_pct = node.get("volume_pct", 0)
-            if not p_h or not p_l:
-                continue
-            bar_w = max(1, int((vol_pct / 100.0) * vp_left))
-            lines.append(
-                f'        box.new(bar_index+{vp_right - bar_w}, {p_h}, bar_index+{vp_right}, {p_l}, '
-                f'bgcolor=c_vp_lvn, border_color=color.new(color.white, 100))'
-            )
-
-    # ── Footer comment ────────────────────────────────────────────────────────
-    bos_count = bos.get("count", 0)
-    mit_count = sum(1 for b in mit_list if not b.get("is_mitigated", False))
-    rej_count = sum(1 for b in rej_list if not b.get("is_mitigated", False))
-    lines += [
-        "",
-        f"// ── Summary: {zone_count} zones drawn ─────────────────────────────────────────",
-        f"// FVGs: {fvgs.get('count_active', 0)}"
-        f"  OBs: {obs.get('count', 0)}"
-        f"  IFVGs: {ifvgs.get('count', 0)}"
-        f"  Breakers: {breakers.get('count', 0)}",
-        f"// MitBlocks: {mit_count}"
-        f"  RejBlocks: {rej_count}"
-        f"  BOS events: {bos_count}",
-        f"// BSL pools: {len(bsl)}"
-        f"  SSL pools: {len(ssl)}"
-        f"  Sweeps: {len(sweeps)}",
-    ]
-
-    pine_script = "\n".join(lines)
+    script, counts = build_overlay(symbol, timeframe, selected, results, ctx)
+    failed = [n for n, r in results.items() if r.get("status") == "error"]
 
     return {
-        "pine_script": pine_script,
+        "status": "ok",
+        "pine_script": script,
+        "layers": [d for d in OVERLAY_LAYERS if d in selected],
+        "layer_counts": counts,
+        "zone_count": sum(counts.values()),
+        "failed_layers": failed,
         "instructions": (
-            "Copy the pine_script value into TradingView: "
+            "Open pine_file and paste its contents into TradingView: "
             "Pine Script Editor → New script → paste → Save → Add to chart. "
-            f"Switch chart to {symbol} {timeframe} first."
+            f"Switch the chart to {symbol} {timeframe} first. "
+            "Each detector is a separate toggle under the indicator's Layers group."
         ),
-        "zone_count": zone_count,
-        "summary": {
-            "fvgs":              fvgs.get("count_active", 0),
-            "obs":               obs.get("count", 0),
-            "ifvgs":             ifvgs.get("count", 0),
-            "breakers":          breakers.get("count", 0),
-            "mitigation_blocks": mit_count,
-            "rejection_blocks":  rej_count,
-            "bsl_pools":         len(bsl),
-            "ssl_pools":         len(ssl),
-            "sweeps":            len(sweeps),
-            "bos_events":        bos_count,
-        },
     }

@@ -11,8 +11,10 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 DEFAULT_SYMBOL = "BTCUSDT"
-DEFAULT_MODEL = "claude-sonnet-4-6"
+DEFAULT_MODEL = "claude-opus-5"
 DEFAULT_TFS = ["1d", "4h", "1h", "15m", "3m"]
+DEFAULT_BACKEND = "api"  # "api" = Messages API billing, "cli" = subscription plan
+DEFAULT_MARKET = "futures"  # "futures" = fapi perpetuals, "spot" = api.binance.com
 
 _SESSION_PATH = Path.home() / ".trading-copilot" / "session.json"
 
@@ -21,6 +23,8 @@ _SESSION_PATH = Path.home() / ".trading-copilot" / "session.json"
 class Session:
     symbol: str = DEFAULT_SYMBOL
     model: str = DEFAULT_MODEL
+    backend: str = DEFAULT_BACKEND
+    market: str = DEFAULT_MARKET
     timeframes: list[str] = field(default_factory=lambda: list(DEFAULT_TFS))
     verbose: bool = False
     last_report: str = ""

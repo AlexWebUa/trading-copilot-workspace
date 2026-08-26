@@ -2,9 +2,9 @@
 title: ICT Silver Bullet
 tags: [entry, ict, silver-bullet, timing, liquidity]
 aliases: [Silver Bullet, ICT Silver Bullet, Сильвер Буллет]
-sources: [raw_notion/ICT_SILVER_BULLET.md]
+sources: [raw_notion/ICT_SILVER_BULLET.md, course-archiver/output/DT_MATERIAL_50/indices_-_ICT_SILVER_BULLET/{Model,Rules,Risk-management,Take-Profit,Issues}.md]
 status: defined
-updated: 2026-04-18
+updated: 2026-08-05
 ---
 
 # ICT Silver Bullet

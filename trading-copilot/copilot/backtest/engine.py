@@ -48,29 +48,90 @@ from copilot.journal.record import TradeRecord, compute_rr, session_from_ts
 # Minimum bars before the engine starts evaluating signals
 _MIN_LEADING_BARS = 50
 
+# How much LTF history an entry-confirmation evaluation may see.
+#
+# The engine used to hand every LTF check the whole series (`_ltf_df.iloc[:cur+1]`),
+# which on a 5000-bar 1h backtest means up to 100k bars of 3m data. `detect_bos`
+# is superlinear in slice length — measured on real BTCUSDT 3m data:
+#
+#     2k bars 0.16s | 8k 0.78s | 20k 2.8s | 50k 13.3s | 100k 46.8s
+#
+# and the answer never changed: `events` was byte-identical between the full
+# slice and a 1000-bar trailing window at 7 cursors spread across the series.
+# Structure detectors only ever look at recent swings, so the older 99% of the
+# slice is pure cost. Unbounded, one arm of the Bellissimo run projected to ~13h.
+#
+# This only ever SHORTENS the slice from the left, so it cannot introduce
+# lookahead. 3000 bars is 3x the window at which the answer already stabilised,
+# leaving room for rules with a larger swing_lookback than Bellissimo's.
+_LTF_LOOKBACK_BARS = 3000
+
 # Detectors that require buy_vol/sell_vol/delta columns — triggers delta fetch
 _DELTA_DETECTORS = frozenset({"detect_cumulative_delta"})
 
 
 def _needs_delta(rule: SetupRule) -> bool:
     """Return True if any condition in rule references a delta-only detector."""
+    from copilot.backtest.rules import flatten_conditions
+
     all_conds = (
-        list(rule.conditions)
+        flatten_conditions(rule.conditions)
         + list(rule.htf_conditions)
-        + list(rule.entry_conditions)
+        + flatten_conditions(rule.entry_conditions)
+        + flatten_conditions(rule.invalidation_conditions)
     )
     return any(c.detector in _DELTA_DETECTORS for c in all_conds)
 
 
+from zoneinfo import ZoneInfo
+
+def _tz(name: str) -> ZoneInfo:
+    """ZoneInfo with an error that says what to install.
+
+    Windows has no system timezone database; zoneinfo falls back to the
+    `tzdata` package, and without it raises a bare ZoneInfoNotFoundError that
+    reads like a typo in the zone name. These constants are built at import
+    time, so the failure takes down the whole backtest package.
+    """
+    try:
+        return ZoneInfo(name)
+    except Exception as exc:  # ZoneInfoNotFoundError and friends
+        raise RuntimeError(
+            f"No timezone database entry for {name!r}. On Windows this means "
+            "the `tzdata` package is missing — install it with "
+            "`pip install tzdata` (it is declared in pyproject.toml for win32)."
+        ) from exc
+
+
+_KYIV_TZ = _tz("Europe/Kyiv")
+# Silver Bullet's timings are defined in New York time. Kyiv and NY shift
+# together for most of the year, but their DST dates differ by ~2 weeks in
+# March and late October, so a Kyiv-anchored window silently slides by an
+# hour twice a year. Anchor to NY and let the conversion handle it.
+_NY_TZ = _tz("America/New_York")
+
 # Timeframe → minutes lookup
 _TF_MINUTES = {
     "1m": 1, "3m": 3, "5m": 5, "15m": 15,
-    "1h": 60, "4h": 240, "1d": 1440,
+    "30m": 30, "1h": 60, "4h": 240, "1d": 1440, "1w": 10080,
 }
 
 # Engine states
 _IDLE = "IDLE"
 _SIGNAL = "SIGNAL"
+# P0-8. Whether the rest of the ENTRY bar can still hit SL/TP depends on how
+# the entry was priced:
+#   signal_close  — filled at the close of that bar; its high/low happened
+#                   BEFORE the fill, so scanning it would invent stop-outs the
+#                   trade never faced. Correctly skipped.
+#   next_open     — filled at the open of the bar; its whole range is post-fill.
+#   fvg_ce /
+#   ob_midpoint   — limit filled intra-bar; the remainder of that bar is live.
+# The last three were skipped too, handing every such trade one bar of stop
+# immunity — an optimistic bias on every result the engine has ever produced.
+# The LTF entry path is unaffected: its exit scan already starts at the fill bar.
+_ENTRY_BAR_EXPOSED = frozenset({"next_open", "fvg_ce", "ob_midpoint"})
+
 _IN_TRADE = "IN_TRADE"
 _LTF_SCAN = "LTF_SCAN"
 _IN_TRADE_P2 = "IN_TRADE_P2"
@@ -97,7 +158,16 @@ class BacktestSummary:
     wins: int = 0
     losses: int = 0
     breakevens: int = 0
+    # Trades still open when the data ran out. Excluded from every statistic
+    # below (their outcome is unknown), but counted here so a rule that likes
+    # to sit in unresolved positions cannot hide it.
+    unfinished: int = 0
     winrate: float = 0.0
+    # 95% Wilson interval for the winrate and percentile-bootstrap interval for
+    # expectancy. Arms in this study run to single-digit trade counts, where a
+    # point estimate is not a result.
+    winrate_ci: tuple[float, float] = (0.0, 0.0)
+    expectancy_ci: tuple[float, float] = (0.0, 0.0)
     avg_winner_r: float = 0.0
     avg_loser_r: float = 0.0
     expectancy: float = 0.0
@@ -270,18 +340,35 @@ class BacktestEngine:
                     if isinstance(self._source, BinanceSource):
                         # Batched fetch handles >1500-bar requests and applies the
                         # 100k cap with a user-visible warning if exceeded.
+                        # Anchor the LTF window to the END of the HTF frame,
+                        # not to "now": with --start/--end the HTF frame is a
+                        # historical slice, and an LTF frame ending today would
+                        # cover a completely different period.
+                        htf_end_ms = int(df.index[-1].timestamp() * 1000) + (
+                            tf_min * 60_000
+                        )
                         _ltf_df = fetch_ohlcv_batched(
                             symbol, rule.entry_tf, ltf_bars_needed,
-                            market=self._source._market,
+                            market=self._source.market,
+                            end_ms=htf_end_ms,
                         )
                     else:
                         # Mock / non-Binance source (e.g. tests): delegate to get_ohlc
                         _ltf_df = self._source.get_ohlc(
                             symbol, rule.entry_tf, ltf_bars_needed
                         )
-                except Exception:
-                    logger.warning("LTF data unavailable for %s/%s: LTF entry will be skipped", symbol, rule.entry_tf, exc_info=True)
-                    _ltf_df = None
+                except Exception as exc:
+                    # NOT a warning-and-continue: a rule that declares entry_tf
+                    # has LTF confirmation as part of its definition. With
+                    # _ltf_df=None the state machine never enters LTF_SCAN and
+                    # silently falls through to the HTF entry path — i.e. it
+                    # backtests a DIFFERENT strategy and reports plausible
+                    # numbers for it. Refusing to run is the only honest option.
+                    raise RuntimeError(
+                        f"LTF data for {symbol}/{rule.entry_tf} could not be fetched "
+                        f"({exc}). Rule '{rule.name}' requires it — refusing to run "
+                        "rather than silently backtesting without LTF confirmation."
+                    ) from exc
 
         completed_trades: list[TradeRecord] = []
 
@@ -302,6 +389,10 @@ class BacktestEngine:
         signal_bar_ts: pd.Timestamp | None = None
         ltf_scan_start_idx: int = 0
         ltf_scan_cursor: int = 0
+        # Price of a resting limit order for "test" entries, or None when the
+        # rule fills at market. Reset on every new signal — a limit left over
+        # from an abandoned setup would fill against the wrong context.
+        pending_limit: float | None = None
         active_ltf_cursor: int = 0  # shared for IN_TRADE + IN_TRADE_P2 LTF exit
 
         # Partial TP variables (Change 3)
@@ -511,59 +602,141 @@ class BacktestEngine:
                         state = _IDLE
                         break
 
-                    ltf_slice = _ltf_df.iloc[: ltf_scan_cursor + 1]
+                    ltf_start = max(0, ltf_scan_cursor + 1 - _LTF_LOOKBACK_BARS)
+                    ltf_slice = _ltf_df.iloc[ltf_start: ltf_scan_cursor + 1]
+                    # Invalidation and entry ask the same detectors the same
+                    # questions about this same bar; share their results.
+                    ltf_call_cache: dict = {}
 
-                    # Evaluate LTF entry conditions
-                    if rule.entry_conditions:
-                        ok, _ = evaluate_conditions_on_slice(
-                            rule.entry_conditions, ltf_slice, active_registry
+                    # Invalidation wins over entry: if the setup died while we
+                    # were waiting, the entry that comes later is not the trade
+                    # the rule describes.
+                    if rule.invalidation_conditions:
+                        dead, _ = evaluate_conditions_on_slice(
+                            rule.invalidation_conditions, ltf_slice, active_registry,
+                            ref_cache=signal_cache, call_cache=ltf_call_cache,
                         )
-                    else:
-                        ok = True
+                        if dead:
+                            skipped_entry += 1
+                            state = _IDLE
+                            break
 
-                    if ok:
-                        ltf_bar = _ltf_df.iloc[ltf_scan_cursor]
+                    ltf_bar = _ltf_df.iloc[ltf_scan_cursor]
+
+                    if pending_limit is None:
+                        # Evaluate LTF entry conditions
+                        if rule.entry_conditions:
+                            ok, _ = evaluate_conditions_on_slice(
+                                rule.entry_conditions, ltf_slice, active_registry,
+                                ref_cache=signal_cache, call_cache=ltf_call_cache,
+                            )
+                        else:
+                            ok = True
+                        if not ok:
+                            ltf_scan_cursor += 1
+                            continue
+
+                        if rule.entry_after_ltf == "fvg_near":
+                            # "Test" entry: rest a limit on the near edge of the
+                            # imbalance printed during the BOS and wait for price
+                            # to trade back into it. Near edge = the side price
+                            # reaches FIRST (top of a bullish gap for a long),
+                            # which is the trader's rule and the conservative
+                            # one — the far edge assumes the gap fills whole.
+                            pending_limit = _ltf_fvg_near_edge(
+                                ltf_slice, rule.direction, active_registry
+                            )
+                            if pending_limit is None:
+                                skipped_entry += 1
+                                state = _IDLE
+                                break
+                            ltf_scan_cursor += 1
+                            continue
+
                         if rule.entry_after_ltf == "signal_close":
-                            entry_price = float(ltf_bar["close"])
+                            candidate_entry = float(ltf_bar["close"])
                         else:  # next_open
                             if ltf_scan_cursor + 1 < len(_ltf_df):
-                                entry_price = float(_ltf_df.iloc[ltf_scan_cursor + 1]["open"])
+                                candidate_entry = float(
+                                    _ltf_df.iloc[ltf_scan_cursor + 1]["open"]
+                                )
                             else:
                                 skipped_entry += 1
                                 state = _IDLE
                                 break
-
-                        sl_price = resolve_sl(
-                            rule.sl_logic, entry_price, rule.direction,
-                            df.iloc[: i + 1], signal_cache,
+                    else:
+                        # A limit is resting — it fills only on a bar that
+                        # actually trades through it.
+                        touched = (
+                            float(ltf_bar["low"]) <= pending_limit
+                            if rule.direction == "long"
+                            else float(ltf_bar["high"]) >= pending_limit
                         )
-                        tp1_price = _resolve_first_tp(rule, entry_price, sl_price,
-                                                       df.iloc[: i + 1], signal_cache)
-                        rr = compute_rr(entry_price, sl_price, tp1_price, rule.direction)
-                        if rr is None or rr < 1.0:
-                            skipped_rr += 1
-                            state = _IDLE
-                            break
+                        if not touched:
+                            ltf_scan_cursor += 1
+                            continue
+                        candidate_entry = pending_limit
 
-                        entry_ts = _ltf_df.index[ltf_scan_cursor].strftime(
-                            "%Y-%m-%dT%H:%M:%SZ"
+                    # The FILL is what has to land inside the timing window;
+                    # the sweep and the BOS may precede it (trader's 11 Aug
+                    # example: sweep 02:45 NY, BOS 02:57, fill 03:12).
+                    if rule.required_entry_hours_ny:
+                        start_h, end_h = rule.required_entry_hours_ny
+                        ny_hour = _ltf_df.index[ltf_scan_cursor].tz_convert(_NY_TZ).hour
+                        inside_ny = (
+                            start_h <= ny_hour < end_h
+                            if start_h <= end_h
+                            else (ny_hour >= start_h or ny_hour < end_h)
                         )
-                        session = session_from_ts(entry_ts)
-                        dow = _ltf_df.index[ltf_scan_cursor].weekday()
+                        if not inside_ny:
+                            ltf_scan_cursor += 1
+                            continue
 
-                        active_trade = _make_trade_record(
-                            run_id=run_id, rule=rule, symbol=symbol,
-                            entry_price=entry_price, sl_price=sl_price,
-                            tp_price=tp1_price, rr_planned=rr,
-                            entry_ts=entry_ts, session=session,
-                            day_of_week=dow,
-                            tools_confirmed=_confirmed_tools(rule, include_ltf=True),
-                        )
-                        active_ltf_cursor = ltf_scan_cursor
-                        active_entry_bar = i
-                        active_original_sl = sl_price
-                        state = _IN_TRADE
+                    entry_price = candidate_entry
+
+                    sl_price = resolve_sl(
+                        rule.sl_logic, entry_price, rule.direction,
+                        df.iloc[: i + 1], signal_cache,
+                    )
+                    if not _stop_is_on_the_right_side(entry_price, sl_price, rule.direction):
+                        # Price is already past the stop — there is no trade to
+                        # take, and pretending otherwise books a fake winner.
+                        skipped_rr += 1
+                        state = _IDLE
                         break
+
+                    tp1_price = _resolve_first_tp(
+                        rule, entry_price, sl_price,
+                        df.iloc[: i + 1], signal_cache, active_registry,
+                    )
+                    rr = (
+                        compute_rr(entry_price, sl_price, tp1_price, rule.direction)
+                        if tp1_price is not None else None
+                    )
+                    if rr is None or rr < rule.min_rr:
+                        skipped_rr += 1
+                        state = _IDLE
+                        break
+
+                    entry_ts = _ltf_df.index[ltf_scan_cursor].strftime(
+                        "%Y-%m-%dT%H:%M:%SZ"
+                    )
+                    session = session_from_ts(entry_ts)
+                    dow = _ltf_df.index[ltf_scan_cursor].weekday()
+
+                    active_trade = _make_trade_record(
+                        run_id=run_id, rule=rule, symbol=symbol,
+                        entry_price=entry_price, sl_price=sl_price,
+                        tp_price=tp1_price, rr_planned=rr,
+                        entry_ts=entry_ts, session=session,
+                        day_of_week=dow,
+                        tools_confirmed=_confirmed_tools(rule, include_ltf=True),
+                    )
+                    active_ltf_cursor = ltf_scan_cursor
+                    active_entry_bar = i
+                    active_original_sl = sl_price
+                    state = _IN_TRADE
+                    break
 
                     ltf_scan_cursor += 1
                 continue  # always skip to next HTF bar after LTF_SCAN processing
@@ -593,12 +766,28 @@ class BacktestEngine:
                     slice_df=df.iloc[: signal_i + 1],
                     detector_cache=signal_cache,
                 )
+                if not _stop_is_on_the_right_side(entry_price, sl_price, rule.direction):
+                    skipped_rr += 1
+                    state = _IDLE
+                    continue
+
                 tp1_price = _resolve_first_tp(
                     rule, entry_price, sl_price,
                     df.iloc[: signal_i + 1], signal_cache,
+                    # Without the registry, every tp_logic that has to call a
+                    # detector (fta_*, fractal_*, nearest_fractal) silently
+                    # resolves to None here and the setup is written off as
+                    # "no acceptable target".
+                    active_registry,
                 )
-                rr = compute_rr(entry_price, sl_price, tp1_price, rule.direction)
-                if rr is None or rr < 1.0:
+                # tp_logic may legitimately return None ("nothing pays min_rr").
+                # compute_rr cannot subtract from None, so the skip has to be
+                # decided before the arithmetic, not inside it.
+                rr = (
+                    compute_rr(entry_price, sl_price, tp1_price, rule.direction)
+                    if tp1_price is not None else None
+                )
+                if rr is None or rr < rule.min_rr:
                     skipped_rr += 1
                     state = _IDLE
                     continue
@@ -618,6 +807,35 @@ class BacktestEngine:
                 active_entry_bar = i
                 active_original_sl = sl_price
                 state = _IN_TRADE
+
+                # P0-8: settle the entry bar itself when the fill left it exposed.
+                if rule.entry_after in _ENTRY_BAR_EXPOSED:
+                    result, exit_price, exit_ts = simulated_exit(
+                        direction=rule.direction,
+                        entry_price=entry_price,
+                        sl_price=sl_price,
+                        tp_price=tp1_price,
+                        future_bars=df.iloc[i: i + 1],
+                    )
+                    if result is not None:
+                        if result == "win" and bool(rule.tp_levels) and len(rule.tp_levels) >= 2:
+                            current_sl_price, current_tp2_price = _transition_to_p2(
+                                active_trade, rule, exit_price, exit_ts,
+                                df.iloc[:i + 1], signal_cache, active_original_sl,
+                            )
+                            active_trade.sl_price = current_sl_price  # type: ignore
+                            state = _IN_TRADE_P2
+                        else:
+                            active_trade = _finalize_trade(
+                                active_trade, result, exit_price, exit_ts,
+                                rule.fee_bps, active_original_sl,
+                                rule.slippage_bps,
+                            )
+                            bars_in_trade_list.append(0)
+                            completed_trades.append(active_trade)
+                            active_trade = None
+                            active_original_sl = None
+                            state = _IDLE
                 continue
 
             # ── IDLE: evaluate conditions ──────────────────────────────────
@@ -626,9 +844,20 @@ class BacktestEngine:
                 if not ok:
                     continue
 
-                # Session filter
+                # Session filter — an explicit Kyiv-hour window wins over the
+                # coarse session labels when the rule sets one.
                 bar_ts = df.index[i].strftime("%Y-%m-%dT%H:%M:%SZ")
-                if rule.required_session:
+                if rule.required_hours_kyiv:
+                    start_h, end_h = rule.required_hours_kyiv
+                    hour = df.index[i].tz_convert(_KYIV_TZ).hour
+                    inside = (
+                        start_h <= hour < end_h
+                        if start_h <= end_h
+                        else (hour >= start_h or hour < end_h)   # window crosses midnight
+                    )
+                    if not inside:
+                        continue
+                elif rule.required_session:
                     sess = session_from_ts(bar_ts)
                     if sess not in rule.required_session:
                         continue
@@ -658,6 +887,7 @@ class BacktestEngine:
                     )
                     ltf_scan_start_idx = _find_ltf_idx(_ltf_df, signal_close_ts)
                     ltf_scan_cursor = ltf_scan_start_idx
+                    pending_limit = None
                     signal_i = i
                     state = _LTF_SCAN
                 else:
@@ -722,13 +952,20 @@ class BacktestEngine:
             start_dt = _parse_date(start) if start else None
             end_dt = _parse_date(end) if end else datetime.now(timezone.utc)
             if start_dt:
-                total_min = (end_dt - start_dt).total_seconds() / 60
-                bars_needed = min(int(total_min / tf_min) + 20, 5000)
+                # No cap: the source paginates in 1500-bar pages. The old 5000
+                # ceiling silently truncated any multi-month window, and below
+                # it the fetch itself truncated to 1500 — a research protocol
+                # that needs 30+ completed trades could never get the sample.
+                # Reach back from NOW, not from end_dt: the source returns the
+                # most recent N bars, so sizing the request to the window alone
+                # yields a frame ending today and starting *after* start_dt —
+                # the trim then leaves only the tail of the requested window.
+                # (Bellissimo, 15 Jun – 5 Aug: asked for 51 days, scanned 32.)
+                now = datetime.now(timezone.utc)
+                total_min = (max(now, end_dt) - start_dt).total_seconds() / 60
+                bars_needed = int(total_min / tf_min) + 20
             else:
                 bars_needed = bars
-            if bars_needed > 5000:
-                print(f"WARNING: date range exceeds 5000 bars cap — truncating.")
-                bars_needed = 5000
 
         # Decide fetch method: delta-enriched or plain OHLCV
         use_delta = rule is not None and _needs_delta(rule)
@@ -739,7 +976,12 @@ class BacktestEngine:
                     df = self._source.get_ohlc_with_delta(symbol, tf, bars_needed)
                 else:
                     from copilot.data.binance import fetch_ohlcv_with_delta
-                    df = fetch_ohlcv_with_delta(symbol, tf, bars_needed, market="futures")
+                    # Follow the source's market — a spot backtest pulling futures
+                    # delta would silently mix two order books.
+                    df = fetch_ohlcv_with_delta(
+                        symbol, tf, bars_needed,
+                        market=getattr(self._source, "market", None),
+                    )
             except Exception:
                 df = self._source.get_ohlc(symbol, tf, bars_needed)
         else:
@@ -749,10 +991,13 @@ class BacktestEngine:
         if start is not None or (start is None and end is not None):
             start_dt = _parse_date(start) if start else None
             end_dt = _parse_date(end) if end else datetime.now(timezone.utc)
+            # _parse_date already returns tz-aware UTC, and pandas rejects
+            # Timestamp(aware_dt, tz=...) outright — so this path raised
+            # ValueError for every --start/--end backtest ever run.
             if start_dt:
-                df = df[df.index >= pd.Timestamp(start_dt, tz="UTC")]
+                df = df[df.index >= pd.Timestamp(start_dt)]
             if end_dt:
-                df = df[df.index <= pd.Timestamp(end_dt, tz="UTC")]
+                df = df[df.index <= pd.Timestamp(end_dt)]
         return df
 
     def _empty_summary(
@@ -781,22 +1026,42 @@ class BacktestEngine:
 # Private helpers (module-level)
 # ---------------------------------------------------------------------------
 
+
+def _stop_is_on_the_right_side(entry: float, sl: float, direction: str) -> bool:
+    """A long's stop must sit below its entry, a short's above it.
+
+    Not a theoretical guard. `sweep_fractal` derives the stop from the bar that
+    took the liquidity, and `recent_sweeps[0]` can point at a sweep price has
+    already travelled away from — or, with a limit entry, the fill can land on
+    the far side of that bar's extreme. The trade then "opens" with the stop
+    already behind price.
+
+    compute_rr takes abs(entry - sl), so an inverted stop produces a perfectly
+    plausible positive R:R, sails through the min_rr gate, and books a fake
+    winner: one such trade on 2026-08-06 was recorded at +11.88R and single-
+    handedly set its arm's expectancy to +3.29R over three trades.
+    """
+    return (sl < entry) if direction == "long" else (sl > entry)
+
+
 def _resolve_first_tp(
     rule: SetupRule,
     entry_price: float,
     sl_price: float,
     slice_df,
     cache: dict,
-) -> float:
-    """Resolve TP1 — from tp_levels[0] if present, else tp_logic."""
-    if rule.tp_levels:
-        return resolve_tp(
-            rule.tp_levels[0].logic, entry_price, sl_price,
-            rule.direction, slice_df, cache,
-        )
+    registry: dict | None = None,
+) -> float | None:
+    """Resolve TP1 — from tp_levels[0] if present, else tp_logic.
+
+    None means "no acceptable target" (only `fta_or_skip` produces it); the
+    caller must treat that as a skipped setup, not as a zero price.
+    """
+    logic = rule.tp_levels[0].logic if rule.tp_levels else rule.tp_logic
     return resolve_tp(
-        rule.tp_logic, entry_price, sl_price,
+        logic, entry_price, sl_price,
         rule.direction, slice_df, cache,
+        min_rr=rule.min_rr, registry=registry,
     )
 
 
@@ -894,6 +1159,53 @@ def _evaluate_htf_conditions(
     return True
 
 
+
+def _ltf_fvg_near_edge(
+    ltf_slice: pd.DataFrame,
+    direction: str,
+    registry: dict,
+) -> float | None:
+    """Near edge of the most recent unfilled FVG in the trade's direction.
+
+    "Test" entries in Silver Bullet rest a limit on the imbalance printed
+    during the BOS, so the zone wanted is the NEWEST one — detect_fvg documents
+    its list as newest → oldest and already drops fully filled zones, so the
+    first zone matching the direction is the answer.
+
+    (The first version of this sorted on a `ts`/`timestamp` key that does not
+    exist — the field is `formed_ts` — so every comparison saw None and the
+    loop fell through to the LAST, i.e. OLDEST, zone. It only looked right on
+    the 11-Aug reference trade because a single bullish zone was in range.)
+
+    Returns None when the BOS printed no imbalance: no test entry is available,
+    which is a property of the setup rather than an error.
+    """
+    fn = registry.get("detect_fvg")
+    if fn is None:
+        return None
+    try:
+        result = fn(ltf_slice)
+    except Exception:
+        return None
+    if not isinstance(result, dict):
+        return None
+
+    want = "bull" if direction == "long" else "bear"
+    for zone in result.get("fvgs") or []:
+        if not isinstance(zone, dict):
+            continue
+        if zone.get("is_mitigated") or zone.get("fill_state") == "filled":
+            continue
+        if want not in str(zone.get("type", "")).lower():
+            continue
+        upper, lower = zone.get("upper"), zone.get("lower")
+        if upper is None or lower is None:
+            continue
+        # Near edge = the side price reaches first: the top of a bullish gap
+        # for a long, the bottom of a bearish one for a short.
+        return float(upper) if direction == "long" else float(lower)
+    return None
+
 def _find_ltf_idx(ltf_df: pd.DataFrame, cutoff_ts) -> int:
     """Return index of first LTF bar opening at or after cutoff_ts.
 
@@ -915,10 +1227,12 @@ def _confirmed_tools(rule: SetupRule, include_ltf: bool = False) -> list[str]:
     detectors belong here: base + HTF, plus LTF entry conditions when the
     entry came through the LTF scan.
     """
-    detectors = [c.detector for c in rule.conditions]
+    from copilot.backtest.rules import flatten_conditions
+
+    detectors = [c.detector for c in flatten_conditions(rule.conditions)]
     detectors += [c.detector for c in rule.htf_conditions]
     if include_ltf:
-        detectors += [c.detector for c in rule.entry_conditions]
+        detectors += [c.detector for c in flatten_conditions(rule.entry_conditions)]
     seen: list[str] = []
     for d in detectors:
         if d not in seen:

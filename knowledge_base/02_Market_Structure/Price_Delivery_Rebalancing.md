@@ -2,9 +2,9 @@
 title: Эффективная и неэффективная доставка цены. Ребалансировка
 tags: [structure, concept, rule/global]
 aliases: [Price Delivery, Rebalancing, BISI, SIBI, Price Efficient, Price Inefficient, Ребалансировка, Доставка цены]
-sources: [raw_notion/Эффективная_и_неэффективная_доставка_цены_Ребалансировка.md]
+sources: [raw_notion/Эффективная_и_неэффективная_доставка_цены_Ребалансировка.md, course-archiver/output/DT_MATERIAL_50/block-2/notion_7.md]
 status: defined
-updated: 2026-04-18
+updated: 2026-08-05
 ---
 
 # Эффективная / неэффективная доставка цены. Ребалансировка

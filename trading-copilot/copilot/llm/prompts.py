@@ -80,6 +80,19 @@ POSITION MANAGEMENT (the trader's policy):
 - SYNC vs DESYNC (check_multi_tf_alignment.sync_quality): strong/continuation → may extend to
   higher-TF pools and hold longer; desync/weak → target the nearest pool only and manage tighter.
 - Minimum 1.5R to TP1; standard risk 1%, risky setups 0.5%.
+
+CHART OUTPUT — the last tool call of every analysis:
+- Once the analysis is settled (bias, POI, levels all decided), call generate_pine_script on the
+  EXECUTION timeframe. It saves a TradingView overlay and returns pine_file — the path you cite
+  in the Chart section.
+- The `detectors` argument is a judgement call, not a dump. Pass ONLY detectors that materially
+  drove the verdict: the one that produced the HTF POI, the one behind each price in the Levels
+  table, and the structure detector the bias rests on. Do NOT pass a detector that returned
+  nothing, or that you checked and then discarded — every extra layer is noise on the trader's chart.
+- Call it a SECOND time only when the HTF POI sits on a different timeframe than the execution one
+  (one chart per timeframe). Never more than two calls per analysis.
+- If the analysis ends in "No setup", still chart the detectors behind that conclusion (structure,
+  liquidity) — the trader needs to see why nothing qualified.
 """
 
 _OUTPUT_FORMAT = """
@@ -142,6 +155,11 @@ Use exactly this markdown structure:
 - **Partials:** 80% at FTA ([price]) / 20% at main target ([price])
 - **Break-even:** [none by default / moved after pool swept / news]
 - **Sync:** [strong → extend / desync → nearest pool only, tighter management]
+
+## Chart
+- **File:** [the pine_file path returned by generate_pine_script — copy it verbatim, never invent one]
+- **Layers:** [the detectors you charted]
+- **Why these:** [one sentence — what each charted layer contributes to the verdict]
 
 ## What I Checked
 - [list each tool called (real tool names only) and its key finding, including the orderflow tools]

@@ -2,9 +2,9 @@
 title: GAP (ценовой разрыв)
 tags: [tool, poi]
 aliases: [GAP, Гэп, Разрыв]
-sources: [raw_notion/GAP.md]
+sources: [raw_notion/GAP.md, course-archiver/output/DT_MATERIAL_50/block-2/notion_6.md]
 status: defined
-updated: 2026-04-18
+updated: 2026-08-05
 ---
 
 # GAP

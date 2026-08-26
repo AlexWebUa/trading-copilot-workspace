@@ -2,9 +2,9 @@
 title: Inducement (индюсмент)
 tags: [inducement, liquidity, poi, fvg, stl]
 aliases: [Inducement, Индюсмент, IDM]
-sources: [raw_notion/Inducement.md]
+sources: [raw_notion/Inducement.md, course-archiver/output/DT_MATERIAL_50/block-3/notion_11.md]
 status: defined
-updated: 2026-04-19
+updated: 2026-08-05
 ---
 
 # Inducement (индюсмент)

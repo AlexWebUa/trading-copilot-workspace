@@ -5,9 +5,39 @@ OHLC fixtures are built programmatically (no live API needed).
 All use the canonical schema from copilot/data/normalize.py.
 """
 
+from pathlib import Path
+from unittest.mock import patch
+
 import numpy as np
 import pandas as pd
 import pytest
+
+
+@pytest.fixture(autouse=True)
+def isolated_home(tmp_path):
+    """Point `~` at a throwaway directory for every test.
+
+    `report.py`, `state.py` and `trace.py` resolve `Path.home()` per call, and
+    the agent-loop tests drive `analyze()` end to end — so an unguarded run wrote
+    fixture reports into the trader's real ~/.trading-copilot/reports/ and
+    overwrote the state snapshot whose diff is injected as "Previous Analysis
+    Context" into the next live analysis. Per-test scope also keeps one test's
+    saved state from leaking into the next test's prompt.
+
+    `session.py` resolves `_SESSION_PATH` at **import** time, so patching
+    Path.home does not reach it — an unguarded `Session.save()` in a test
+    overwrote the trader's real session (symbol, model, backend, last report).
+    It is redirected explicitly below. `journal/db.py` isolates itself.
+    """
+    home = tmp_path / "home"
+    home.mkdir()
+
+    import copilot.session
+
+    with patch.object(Path, "home", classmethod(lambda cls: home)), patch.object(
+        copilot.session, "_SESSION_PATH", home / ".trading-copilot" / "session.json"
+    ):
+        yield home
 
 
 def _make_df(rows: list[dict], freq: str = "1h") -> pd.DataFrame:

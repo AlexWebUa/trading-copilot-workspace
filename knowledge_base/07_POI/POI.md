@@ -2,9 +2,9 @@
 title: POI (Point of Interest)
 tags: [poi, liquidity, structure, zone]
 aliases: [POI, Point of Interest, Зона интереса, Точка интереса]
-sources: [raw_notion/POI.md, raw_notion/Why_POI_not_POI.md, raw_notion/Как_подобрать_POI.md]
+sources: [raw_notion/POI.md, raw_notion/Why_POI_not_POI.md, raw_notion/Как_подобрать_POI.md, course-archiver/output/DT_MATERIAL_50/block-5/notion_2.md, course-archiver/output/DT_MATERIAL_50/block-3/notion_9.md]
 status: defined
-updated: 2026-04-18
+updated: 2026-08-05
 ---
 
 # POI (Point of Interest)
@@ -37,6 +37,25 @@ POI — не просто технические элементы на граф�
 | **Синхронизация со структурой** | Желательно — не всегда обязательно (контртренд допустим, но редко) |
 
 **Бонус**: наличие **Inducement** (ликвидности перед POI) — приманка для цены, увеличивает вероятность теста POI.
+
+## Два подхода к входу от POI
+
+| Подход | Механика |
+|---|---|
+| **От sweep/raid** | Рынок сначала снимает high/low, затем даёт разворотную реакцию. Sweep сам по себе — HTF-триггер, вход ищется на LTF |
+| **От теста POI** | Цена возвращается в заранее отмеченную зону — используется как рабочая область для поиска подтверждённого входа |
+
+Подходы комбинируются: сначала sweep ликвидности → затем возврат в POI → реакция внутри зоны.
+
+## Каталог формаций, которые могут быть POI
+
+**Inefficiency Types**: FVG, I-FVG, BPR, Volume Imbalance, GAP
+
+**Block Types**: Order Block (OB), Sponsorship Candle (SC), STB/BTS, Breaker Block, Mitigation Block, Propulsion Block, SNR, Rejection Block
+
+Всех их объединяет одна идея: рынок уже показал там значимое взаимодействие сторон, поэтому при возврате зона может снова вызвать реакцию.
+
+**Промежуточная ликвидность перед POI**: перед сильной зоной нередко остаётся локальная ликвидность (равные хаи/лои, внутренние экстремумы, короткие диапазоны) — рынок сначала взаимодействует с ней, и только потом доходит до ключевого POI. Стоит смотреть не только на сам POI, но и на структуру перед ним.
 
 ## Выбор таймфрейма POI
 

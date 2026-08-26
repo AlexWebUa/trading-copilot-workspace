@@ -99,6 +99,7 @@ updated: 2026-04-19
 
 ## Связанные заметки
 
+- [[Indices_by_Ilysha]] — другая система в том же канале/на тех же активах (не путать)
 - [[../10_Instruments/USA_Indices|США: Индексы (NQ, ES, YM, RTY)]]
 - [[../03_Tools/SMT_Divergence|SMT Divergence]]
 - [[../08_Entry_Models/Entry_Models|Entry Models]]

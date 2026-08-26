@@ -2,9 +2,9 @@
 title: Rejection Block (RB)
 tags: [tool, poi]
 aliases: [RB, Rejection Block, Блок отвержения]
-sources: [raw_notion/Rejection_Block.md]
+sources: [raw_notion/Rejection_Block.md, course-archiver/output/DT_MATERIAL_50/block-3/notion_6.md]
 status: defined
-updated: 2026-04-18
+updated: 2026-08-05
 ---
 
 # Rejection Block (RB)

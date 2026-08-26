@@ -1,14 +1,23 @@
 """
-Binance public REST data source — USD-M Futures (fapi.binance.com).
+Binance public REST data source — USD-M Futures (fapi.binance.com) or spot
+(api.binance.com).
 
-Uses perpetual futures data (BTCUSDT, ETHUSDT, etc.) which is what
-discretionary traders actually trade. No auth required.
-Rate limit: 2400 req/min weight.
-Endpoint: GET /fapi/v1/klines
+Futures is the default: perpetuals (BTCUSDT, ETHUSDT, …) are what the
+discretionary trader actually trades. Spot exists because a growing set of
+listings is spot-only — tokenised stocks (QQQBUSDT) and some commodities — and
+a futures request for one of those fails with `-1121 Invalid symbol`.
 
-Spot fallback: set market="spot" to use api.binance.com instead.
+Market selection, highest precedence first:
+  1. `market=` passed to BinanceSource / fetch helpers
+  2. `COPILOT_MARKET` env var — how the REPL's `--market` flag reaches an
+     in-process registry AND the MCP server the cli backend spawns
+  3. "futures"
+
+No auth required. Rate limit: 2400 req/min weight.
+Endpoints: GET /fapi/v1/klines · GET /api/v3/klines
 """
 
+import os
 import time
 
 import httpx
@@ -22,9 +31,30 @@ from copilot.data.normalize import make_empty, normalize_binance, normalize_bina
 _FUTURES_URL = "https://fapi.binance.com"
 _FUTURES_ENDPOINT = "/fapi/v1/klines"
 
-# Spot fallback
+# Spot
 _SPOT_URL = "https://api.binance.com"
 _SPOT_ENDPOINT = "/api/v3/klines"
+
+class SymbolNotOnMarket(RuntimeError):
+    """The symbol exists on Binance, just not on the market being queried."""
+
+
+# Max klines per request, per market. Spot caps at 1000 and futures at 1500 —
+# and neither errors on a larger `limit`, it just returns fewer rows. Code that
+# assumed 1500 everywhere silently truncated every spot range longer than 1000
+# bars, and stopped paginating because the short page looked like end-of-history.
+_BATCH_LIMITS = {"futures": 1500, "spot": 1000}
+
+MARKETS = ("futures", "spot")
+DEFAULT_MARKET = "futures"
+
+
+def resolve_market(market: str | None = None) -> str:
+    """Explicit argument > COPILOT_MARKET > futures."""
+    value = (market or os.getenv("COPILOT_MARKET") or DEFAULT_MARKET).strip().lower()
+    if value not in MARKETS:
+        raise ValueError(f"Unknown market {value!r}. Expected one of: {', '.join(MARKETS)}")
+    return value
 
 
 def _to_ms(t) -> int:
@@ -40,7 +70,7 @@ def _to_ms(t) -> int:
 # Map copilot TF notation → Binance interval param
 _TF_MAP = {
     "1m": "1m", "3m": "3m", "5m": "5m",
-    "15m": "15m", "30m": "30m", "1h": "1h", "4h": "4h", "1d": "1d",
+    "15m": "15m", "30m": "30m", "1h": "1h", "4h": "4h", "1d": "1d", "1w": "1w",
 }
 
 
@@ -51,10 +81,11 @@ class BinanceSource:
         self,
         cache: OHLCCache | None = None,
         timeout: float = 10.0,
-        market: str = "futures",  # "futures" | "spot"
+        market: str | None = None,  # "futures" | "spot"; None → resolve_market()
     ):
         self._cache = cache or OHLCCache()
         self._timeout = timeout
+        market = resolve_market(market)
         self._market = market
         if market == "futures":
             self._base_url = _FUTURES_URL
@@ -67,6 +98,35 @@ class BinanceSource:
 
     def supports(self, symbol: str) -> bool:
         return symbol.endswith("USDT") or symbol.endswith("BTC")
+
+
+    @property
+    def market(self) -> str:
+        return self._market
+
+    def _get(self, client: httpx.Client, params: dict) -> list:
+        """GET klines, turning "symbol not on this market" into actionable advice.
+
+        Binance answers -1121 for a symbol that simply lives on the other market
+        — spot-only listings (tokenised stocks, some commodities) are the common
+        case. The raw 400 says nothing about that, so the trader would read it as
+        "the symbol does not exist".
+        """
+        resp = client.get(f"{self._base_url}{self._endpoint}", params=params)
+        if resp.status_code == 400:
+            try:
+                code = resp.json().get("code")
+            except Exception:
+                code = None
+            if code == -1121:
+                other = "spot" if self._market == "futures" else "futures"
+                raise SymbolNotOnMarket(
+                    f"{params.get('symbol')} is not listed on Binance {self._market}. "
+                    f"Try the {other} market (REPL: `market {other}`, "
+                    f"CLI: `--market {other}`, env: COPILOT_MARKET={other})."
+                )
+        resp.raise_for_status()
+        return resp.json()
 
     def get_ohlc(
         self,
@@ -116,22 +176,74 @@ class BinanceSource:
         if cached is not None:
             return cached
 
-        interval = _TF_MAP[tf]
-        params = {"symbol": symbol, "interval": interval, "limit": min(bars, 1500)}
-        with httpx.Client(timeout=self._timeout) as client:
-            resp = client.get(f"{self._base_url}{self._endpoint}", params=params)
-            resp.raise_for_status()
-        df = normalize_binance_with_delta(resp.json())
+        if bars > self._batch_limit:
+            df = self._paginate_back(symbol, tf, bars, normalize_binance_with_delta)
+        else:
+            interval = _TF_MAP[tf]
+            params = {"symbol": symbol, "interval": interval, "limit": bars}
+            with httpx.Client(timeout=self._timeout) as client:
+                raw = self._get(client, params)
+            df = normalize_binance_with_delta(raw)
         self._cache.put(source_id, symbol, tf, bars, df)
         return df
 
-    def _fetch(self, symbol: str, tf: str, bars: int) -> pd.DataFrame:
+
+    @property
+    def _batch_limit(self) -> int:
+        return _BATCH_LIMITS[self._market]
+
+    def _paginate_back(self, symbol: str, tf: str, bars: int, normalizer) -> pd.DataFrame:
+        """Walk backwards in 1500-bar pages until *bars* are collected.
+
+        A single klines request is capped at 1500 by Binance. Passing a larger
+        `limit` is not an error — the API just returns 1500, so a request for
+        5000 bars silently produced 1499 and every caller believed it had the
+        window it asked for. Backtests over multi-month samples were quietly
+        running on a fraction of the data.
+        """
         interval = _TF_MAP[tf]
-        params = {"symbol": symbol, "interval": interval, "limit": min(bars, 1500)}
+        frames: list[pd.DataFrame] = []
+        remaining = bars
+        end_ms: int | None = None
+
+        with httpx.Client(timeout=max(self._timeout, 30.0)) as client:
+            while remaining > 0:
+                params: dict = {
+                    "symbol": symbol,
+                    "interval": interval,
+                    "limit": min(remaining, self._batch_limit),
+                }
+                if end_ms is not None:
+                    params["endTime"] = end_ms
+
+                raw = self._get(client, params)
+                if not raw:
+                    break
+
+                frames.append(normalizer(raw))
+                remaining -= len(raw)
+
+                if len(raw) < params["limit"]:
+                    break  # start of available history
+
+                end_ms = int(raw[0][0]) - 1
+                if remaining > 0:
+                    time.sleep(0.1)  # rate-limit courtesy
+
+        if not frames:
+            return make_empty()
+
+        result = pd.concat(frames)
+        result = result[~result.index.duplicated(keep="first")]
+        return result.sort_index()
+
+    def _fetch(self, symbol: str, tf: str, bars: int) -> pd.DataFrame:
+        if bars > self._batch_limit:
+            return self._paginate_back(symbol, tf, bars, normalize_binance)
+        interval = _TF_MAP[tf]
+        params = {"symbol": symbol, "interval": interval, "limit": bars}
         with httpx.Client(timeout=self._timeout) as client:
-            resp = client.get(f"{self._base_url}{self._endpoint}", params=params)
-            resp.raise_for_status()
-        return normalize_binance(resp.json())
+            return normalize_binance(self._get(client, params))
 
     def _fetch_range(
         self,
@@ -150,23 +262,21 @@ class BinanceSource:
                 params: dict = {
                     "symbol": symbol,
                     "interval": interval,
-                    "limit": 1500,
+                    "limit": self._batch_limit,
                 }
                 if current_start is not None:
                     params["startTime"] = current_start
                 if end_ms is not None:
                     params["endTime"] = end_ms
 
-                resp = client.get(f"{self._base_url}{self._endpoint}", params=params)
-                resp.raise_for_status()
-                raw = resp.json()
+                raw = self._get(client, params)
                 if not raw:
                     break
 
                 batch = normalize_binance(raw)
                 frames.append(batch)
 
-                if len(raw) < 1500:
+                if len(raw) < self._batch_limit:
                     break  # received fewer than max → no more pages
 
                 last_open_ms = int(raw[-1][0])
@@ -194,7 +304,7 @@ def fetch_ohlcv_with_delta(
     symbol: str,
     tf: str,
     bars: int = 200,
-    market: str = "futures",
+    market: str | None = None,
 ) -> pd.DataFrame:
     """Fetch klines and return OHLCV + per-bar delta columns.
 
@@ -213,16 +323,62 @@ def fetch_ohlcv_with_delta(
 _MAX_BATCHED_BARS = 100_000
 
 
+
+# Binance answers 429 when a burst of requests exceeds its weight budget. A
+# single backtest paginating 95k 3m bars is 64 requests; several arms running
+# in parallel multiply that and trip the limit mid-run. Without a retry the
+# whole run dies — and worse, the caller used to swallow the failure and
+# backtest a different strategy (see engine._run_loop). Back off and continue.
+_RETRY_STATUSES = frozenset({429, 418, 500, 502, 503, 504})
+_MAX_RETRIES = 6
+
+
+def _get_batch_with_retry(client, url: str, params: dict) -> list:
+    """GET one kline page, backing off on rate limits and transient 5xx."""
+    delay = 1.0
+    last_exc: Exception | None = None
+    for attempt in range(_MAX_RETRIES):
+        try:
+            resp = client.get(url, params=params)
+            if resp.status_code in _RETRY_STATUSES:
+                # Binance sends Retry-After on 418; honour it when present.
+                wait = float(resp.headers.get("Retry-After", 0)) or delay
+                time.sleep(min(wait, 60.0))
+                delay = min(delay * 2, 60.0)
+                continue
+            resp.raise_for_status()
+            return resp.json()
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code not in _RETRY_STATUSES:
+                raise
+            last_exc = exc
+            time.sleep(delay)
+            delay = min(delay * 2, 60.0)
+        except httpx.TransportError as exc:      # timeouts, connection resets
+            last_exc = exc
+            time.sleep(delay)
+            delay = min(delay * 2, 60.0)
+    raise RuntimeError(
+        f"Binance kline request failed after {_MAX_RETRIES} attempts: {url} {params}"
+    ) from last_exc
+
+
 def fetch_ohlcv_batched(
     symbol: str,
     tf: str,
     total_bars: int,
-    market: str = "futures",
-    batch_size: int = 1500,
+    market: str | None = None,
+    batch_size: int | None = None,
+    end_ms: int | None = None,
 ) -> pd.DataFrame:
     """
     Fetch up to total_bars of OHLCV data in batches of batch_size,
-    paginating backwards from the most recent bar.
+    paginating backwards from `end_ms` (default: the most recent bar).
+
+    `end_ms` exists for date-ranged backtests. Without it the LTF frame always
+    ends at "now" while the HTF frame has been trimmed to a historical window,
+    so the two timeframes describe different periods and the entry scan looks
+    for confirmation in bars that postdate the signal by months.
     Deduplicates and sorts by timestamp ascending.
     Returns a single concatenated DataFrame.
 
@@ -239,6 +395,9 @@ def fetch_ohlcv_batched(
     assert_valid_tf(tf)
     symbol = symbol.upper()
     interval = _TF_MAP[tf]
+    market = resolve_market(market)
+
+    batch_size = batch_size or _BATCH_LIMITS[market]
 
     if market == "futures":
         base_url, endpoint = _FUTURES_URL, _FUTURES_ENDPOINT
@@ -247,7 +406,7 @@ def fetch_ohlcv_batched(
 
     frames: list[pd.DataFrame] = []
     remaining = total_bars
-    end_time_ms: int | None = None  # None → most recent bar
+    end_time_ms: int | None = end_ms  # None → most recent bar
 
     with httpx.Client(timeout=30.0) as client:
         while remaining > 0:
@@ -256,9 +415,7 @@ def fetch_ohlcv_batched(
             if end_time_ms is not None:
                 params["endTime"] = end_time_ms
 
-            resp = client.get(f"{base_url}{endpoint}", params=params)
-            resp.raise_for_status()
-            raw = resp.json()
+            raw = _get_batch_with_retry(client, f"{base_url}{endpoint}", params)
             if not raw:
                 break
 

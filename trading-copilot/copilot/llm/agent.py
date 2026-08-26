@@ -30,7 +30,7 @@ from copilot.llm.tools import ToolRegistry
 from copilot.llm.trace import write_trace
 
 MAX_TURNS = 12
-DEFAULT_MODEL = "claude-sonnet-4-6"
+DEFAULT_MODEL = "claude-opus-5"
 
 
 class AgentLoopBudgetExceeded(RuntimeError):
@@ -164,7 +164,10 @@ def _result_key(name: str, tool_input: dict) -> str:
 
 
 # Integer or decimal token; an optional thousands 'k' suffix is handled by the caller.
-_NUM_TOKEN = re.compile(r"(?<![\w.])(\d+(?:\.\d+)?)(k|K)?")
+# The comma-grouped alternative comes first so "64,938" is consumed whole — split
+# into "64" and "938" it produced a pair of bogus unverified values on every
+# report that used thousands separators.
+_NUM_TOKEN = re.compile(r"(?<![\w.])(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)(k|K)?")
 
 
 def _collect_result_numbers(obj: Any, out: set[float]) -> None:
@@ -214,7 +217,7 @@ def _verify_report_numbers(report_text: str, tool_results: dict[str, Any]) -> li
         if after == "-" or before == "-":
             continue  # date component (2026-06-19)
 
-        value = float(m.group(1)) * (1000 if suffix else 1)
+        value = float(m.group(1).replace(",", "")) * (1000 if suffix else 1)
         if value < 10:
             continue  # fib ratios, small counts
 

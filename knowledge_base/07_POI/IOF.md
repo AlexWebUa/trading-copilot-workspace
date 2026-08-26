@@ -2,9 +2,9 @@
 title: Institutional Order Flow (IOF)
 tags: [poi, iof, order-flow, entry, ltf]
 aliases: [IOF, Institutional Order Flow, Институциональный ордер-флоу]
-sources: [raw_notion/Institutional_Order_Flow_Как_пример_работы_в_POI_Углубленная_работа_в_POI_и_за_ее_пределами.md]
+sources: [raw_notion/Institutional_Order_Flow_Как_пример_работы_в_POI_Углубленная_работа_в_POI_и_за_ее_пределами.md, course-archiver/output/DT_MATERIAL_50/block-5/notion_4.md]
 status: defined
-updated: 2026-04-18
+updated: 2026-08-05
 ---
 
 # Institutional Order Flow (IOF)

@@ -67,6 +67,7 @@ updated: 2026-04-18
 
 ## Связанные заметки
 
+- [[DAX_Rules_Viktoriia]] — другой авторский чек-лист POI/таргетов по FDAX
 - [[../11_Trade_Management/Order_Flow|Order Flow (OF)]]
 - [[../04_Market_Profile/OAR_IDAR|OAR / IDAR / SP]]
 - [[../05_Sessions_Timings/Session_Dynamics|Динамика сессий]]

@@ -311,7 +311,9 @@ def _fetch_shared_df(
     if any_delta:
         try:
             from copilot.data.binance import fetch_ohlcv_with_delta
-            return fetch_ohlcv_with_delta(symbol, tf, bars, market="futures")
+            # market=None → resolve_market(): honours COPILOT_MARKET, so a spot
+            # session compares rules on spot data instead of silently on futures.
+            return fetch_ohlcv_with_delta(symbol, tf, bars, market=None)
         except Exception:
             logger.warning("Delta fetch failed for %s/%s; falling back to standard OHLCV", symbol, tf, exc_info=True)
 

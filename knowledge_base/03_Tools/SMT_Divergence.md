@@ -2,9 +2,9 @@
 title: SMT Divergence
 tags: [tool, confirmation]
 aliases: [SMT, SMT Divergence, Smart Money Technique, Inversely Correlated SMT]
-sources: [raw_notion/SMT_Divergence.md]
+sources: [raw_notion/SMT_Divergence.md, course-archiver/output/DT_MATERIAL/indices-price-action_-_SMT_in_Practice/notion.md]
 status: defined
-updated: 2026-04-18
+updated: 2026-08-04
 ---
 
 # SMT Divergence
@@ -52,6 +52,10 @@ updated: 2026-04-18
 ### Inversely Correlated SMT
 
 Та же логика, но на **обратной корреляции**: при рассинхроне анализируется зеркальная структура. Принцип и интерпретация идентичны.
+
+## Практическое правило (индексы NQ/ES)
+
+**SMT = снятие ликвидности.** Если снятие произошло хотя бы на одном из коррелирующих активов, а на другом — нет, для целей контекста/входа это **считается снятием сразу на обоих** (не нужно ждать, пока каждый актив снимет ликвидность отдельно). Актив, которому **не потребовалась** дополнительная ликвидность для разворота — более сильный, приоритетный для входа в направлении разворота.
 
 ## Условия применения
 

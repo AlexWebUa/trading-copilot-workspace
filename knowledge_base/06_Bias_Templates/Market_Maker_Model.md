@@ -2,9 +2,9 @@
 title: Market Maker Buy/Sell Model
 tags: [bias, market-maker, model, liquidity, ict]
 aliases: [Market Maker Model, MMBM, Market Maker B/S Model, MM Buy Model, MM Sell Model]
-sources: [raw_notion/Market_Maker_BS_Model.md]
+sources: [raw_notion/Market_Maker_BS_Model.md, course-archiver/output/DT_MATERIAL_50/fundamental_-_ICT_Forex_-_Market_Maker_Series_Vol_3_of_5_Структура_рынка_ключевые_уровни_SMT/notion.md]
 status: defined
-updated: 2026-04-18
+updated: 2026-08-04
 ---
 
 # Market Maker Buy/Sell Model
@@ -42,6 +42,23 @@ updated: 2026-04-18
 - SMT-дивергенция в шаге 3 — сильнейшее подтверждение разворота.
 - Коррекция в шаге 2 к исходной консолидации без реакции → дополнительный вход.
 
+## Key Levels — на каких уровнях искать разворот (шаг 2)
+
+Крупные фонды анализируют структуру только на старших ТФ и **не спускаются на младшие** для поиска ключевых уровней — поэтому «Run to Support/Resistance» стоит искать относительно скоплений ликвидности на:
+
+- **1M, 1W, 1D, 4H** — EQH/EQL (равные хаи/лои), PMH/PML (предыдущий месяц), PWH/PWL (предыдущая неделя), PDH/PDL (предыдущий день), Swing High/Low.
+
+### Два сценария формирования разворотного минимума/максимума у ключевого уровня
+
+| Сценарий | Механика | Сетап |
+|---|---|---|
+| Более низкий минимум перед разворотом | Цена формирует минимум → коррекция → **новый более низкий минимум** → уход вверх | Обычный вход после слома структуры |
+| Более высокий минимум перед разворотом | Цена формирует минимум → уходит выше → **более высокий минимум** → продолжение вверх | **ICT Breaker**: покупка при пробое недавнего максимума на уровне брейкера |
+
+(Зеркально для MMSM — максимум вместо минимума, шорт вместо лонга.)
+
+> И в MMBM, и в MMSM — сетап на Key Level значительно надёжнее при наличии SMT-дивергенции с коррелируемым активом.
+
 ## Связанные заметки
 
 - [[../05_Sessions_Timings/PO3_AMD|PO3 / AMD (Power of Three)]]
@@ -49,5 +66,7 @@ updated: 2026-04-18
 - [[../01_Concepts/Distribution_Phase|Distribution / Re-distribution]]
 - [[../03_Tools/SMT_Divergence|SMT Divergence]]
 - [[../03_Tools/Order_Block|Order Block]]
+- [[../03_Tools/Breaker_Block|Breaker Block]] — родственная механика ICT Breaker на Key Level
 - [[../06_Bias_Templates/ICT_Daily_Bias|ICT Daily Bias]]
+- [[../06_Bias_Templates/ICT_Quantitative_Bias_COT|Количественный BIAS (COT)]] — долгосрочный фундамент, на котором строится выбор направления MMBM/MMSM
 - [[../99_Glossary/Glossary#M|Глоссарий: MMBM]]

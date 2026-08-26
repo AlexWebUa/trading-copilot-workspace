@@ -50,8 +50,13 @@ Verdicts from [DETECTOR_REVIEW_2026-06-10.md](DETECTOR_REVIEW_2026-06-10.md); ex
 
 - **`data/`** — Binance USD-M futures (`fapi.binance.com`, spot fallback), parquet TTL cache, canonical
   OHLCV schema, `DataSource` protocol. Forming candle dropped. Delta from kline `taker_buy_base_vol`.
-- **`detectors/`** — 23 tools + `generate_pine_script` (parallel `ThreadPoolExecutor`, TradingView v5
-  overlay with `alertcondition()`s). `smc_lib.py` wraps `smartmoneyconcepts`.
+- **`detectors/`** — 23 tools + `generate_pine_script`, which charts only the detectors the analysis
+  deemed significant (the LLM passes `detectors=[...]`; parallel `ThreadPoolExecutor`, TradingView v5
+  overlay with per-layer toggles and `alertcondition()`s). `smc_lib.py` wraps `smartmoneyconcepts`.
+- **`pine/`** — the Pine generator itself, shared with `scripts/debug_detectors.py`: 19 per-detector
+  emitters (moved out of the script, byte-identical), the runner table, `build_overlay`, and the
+  artifact store. 12 layers are chartable — quarantined detectors, the delta layer and the two
+  info-table emitters are excluded (see `OVERLAY_LAYERS`).
 - **`llm/`** — `ToolRegistry` (auto-discovery, quarantine, request-scoped cache), multi-turn agent with
   ephemeral KB prompt caching, report/trace/state persistence. Tool results keyed by `(name, symbol, tf)`
   (no multi-TF overwrite); single assistant turn per round; `_verify_report_numbers` flags report prices

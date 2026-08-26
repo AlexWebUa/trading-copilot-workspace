@@ -100,6 +100,7 @@ Bid Volume уровня N значительно превышает Ask Volume �
 
 ## Связанные заметки
 
+- [[../12_Market_Mechanics/Market_Microstructure]] — механика Absorption на уровне книги ордеров (Sweep/Raid: маркет-ордера поглощаются лимитными без движения цены)
 - [[../04_Market_Profile/Volume_Profile|Volume Profile]] — объёмная структура (HVN/LVN)
 - [[../04_Market_Profile/Cumulative_Delta|Cumulative Delta]] — совокупный поток агрессии
 - [[../07_POI/POI|Point of Interest]] — зоны для применения Footprint

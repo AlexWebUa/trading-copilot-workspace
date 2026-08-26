@@ -1,7 +1,7 @@
 ---
 title: Map of Content (MOC) — главная карта базы знаний
 tags: [index, moc]
-updated: 2026-04-25
+updated: 2026-08-04
 ---
 
 # База знаний — Торговая система
@@ -21,6 +21,7 @@ updated: 2026-04-25
 - [[09_Setups]] — сетапы и стратегии (NYSE Open, PM Continuation, DT15/DT16, STBBTS, DAX Bell, ORB, сезонные и AI-фильтруемые системы и др.)
 - [[10_Instruments]] — правила для конкретных инструментов: NASDAQ, SP500, DJ, RUT, DAX, Indices Fundamentals
 - [[11_Trade_Management]] — Order Flow, Momentum, Break-Even, развороты, Re-Sweep, RTGS
+- [[12_Market_Mechanics]] — механика рынка «под капотом»: маркет-мейкеры, иерархия участников (Maker/Taker, Tier 1-4), микроструктура, типы ордеров и TIF, матчинг и роутинг (SOR), манипуляции ордерами, арбитраж, алгоритмы исполнения (TWAP/VWAP/POV/HFT)
 - [[99_Glossary|Глоссарий]] — алфавитный список терминов с определениями
 
 ## Системные документы

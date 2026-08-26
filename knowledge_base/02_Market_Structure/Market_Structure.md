@@ -2,9 +2,9 @@
 title: Рыночная структура (Market Structure)
 tags: [structure, concept, rule/global]
 aliases: [Market Structure, MS, Структура, Рыночная структура]
-sources: [raw_notion/Market_Structure.md]
+sources: [raw_notion/Market_Structure.md, course-archiver/output/DT_MATERIAL/structure-and-liquidity/notion_1.md]
 status: defined
-updated: 2026-04-18
+updated: 2026-08-05
 ---
 
 # Market Structure
@@ -35,6 +35,8 @@ updated: 2026-04-18
 
 - **Swing (Context) Structure** — крупные перебития, задающие направление.
 - **Minor Structure** — мелкие колебания внутри свинга, используемые для тайминга входа (см. [[BOS#Fractal / Minor BOS|Minor BOS]]).
+
+> ⚠️ **Не путать** с ситуацией «HTF-контекст (например, 1H) + структура на LTF (например, 5M) для входа» — это отдельное явление, **мульти-TF анализ** (см. [[../01_Concepts/Multi_TF_Analysis]]), а не Minor Structure. В части источников курса эти два понятия смешиваются в изложении, но в этой KB термин **Minor Structure зарезервирован строго за same-TF** смыслом.
 
 ## Важность структуры
 

@@ -261,6 +261,9 @@ def resolve_sl(
             pct = 1.0
         return entry_price * (1.0 + sign * pct / 100.0)
 
+    if sl_logic == "sweep_fractal":
+        return _sl_from_sweep_fractal(entry_price, direction, slice_df, detector_cache, atr)
+
     if sl_logic == "swing":
         return _sl_from_swing(entry_price, direction, slice_df, detector_cache, atr)
 
@@ -375,16 +378,34 @@ def resolve_tp(
     direction: str,
     slice_df: pd.DataFrame,
     detector_cache: dict,
-) -> float:
+    min_rr: float = 1.8,
+    registry: dict | None = None,
+) -> float | None:
     """
     Compute take-profit price from tp_logic string.
 
     tp_logic options:
-      "rr:N"       — entry ± risk * N (always works)
-      "liquidity"  — nearest unswept liquidity pool above/below
-      "next_hvn"   — nearest High Volume Node above/below (from volume_profile)
+      "rr:N"             — entry ± risk * N (always works)
+      "liquidity"        — nearest unswept liquidity pool above/below
+      "next_hvn"         — nearest High Volume Node above/below
+      "fractal_or_fta"   — the 1h3m target rule: nearest fractal that pays
+                           min_rr; if a counter-trend POI (FTA) blocks the path
+                           before it, take exactly min_rr inside the FTA instead.
+                           None when neither is reachable → skip the setup.
+      "fta_or_skip"      — nearest counter-trend POI (FVG/OB/breaker/mitigation)
+                           between entry and the liquidity draw. TP goes at its
+                           near edge if that still pays `min_rr`; otherwise the
+                           trade is not taken (returns None).
+      "fta_or_liquidity" — same, but an FTA too close to pay is ignored and the
+                           liquidity pool behind it becomes the target.
 
-    Falls back to "rr:2.0" if structural TP cannot be resolved.
+    The two FTA variants exist to answer an open question of the trader's
+    methodology — whether an obstacle sitting too close is a reason to skip the
+    trade or merely something to trade through. They differ only here, so a
+    backtest can measure it.
+
+    Returns None only for "fta_or_skip"; callers treat None as "skip this setup".
+    Falls back to "rr:2.0" if a structural TP cannot be resolved.
     """
     risk = abs(entry_price - sl_price)
     sign = 1 if direction == "long" else -1
@@ -402,6 +423,31 @@ def resolve_tp(
             return tp
         # fallback
         return entry_price + sign * risk * 2.0
+
+    if tp_logic == "nearest_fractal":
+        return _tp_nearest_fractal(
+            entry_price, sl_price, direction, slice_df, detector_cache, registry, min_rr
+        )
+
+    if tp_logic in ("fractal_or_fta", "fractal_or_fta_soft"):
+        return _tp_fractal_or_fta(
+            entry_price, sl_price, direction, slice_df, detector_cache, registry, min_rr,
+            ignore_near_fta=(tp_logic == "fractal_or_fta_soft"),
+        )
+
+    if tp_logic in ("fta_or_skip", "fta_or_liquidity"):
+        fta = _tp_from_fta(entry_price, direction, detector_cache, slice_df, registry)
+        if fta is not None:
+            rr = abs(fta - entry_price) / risk if risk > 0 else 0.0
+            if rr >= min_rr:
+                return fta
+            if tp_logic == "fta_or_skip":
+                return None
+        # No FTA in the way, or it was too close and we chose to trade through it.
+        beyond = _tp_from_liquidity(entry_price, direction, detector_cache)
+        if beyond is not None:
+            return beyond
+        return None if tp_logic == "fta_or_skip" else entry_price + sign * risk * 2.0
 
     if tp_logic == "next_hvn":
         tp = _tp_from_hvn(entry_price, direction, detector_cache, slice_df)
@@ -483,3 +529,278 @@ def _compute_atr(df: pd.DataFrame, period: int = 14) -> float:
     rolling = tr.rolling(period).mean().iloc[-1]
     result = float(rolling) if pd.notna(rolling) else float(tr.mean())
     return result if result > 0 else 1.0
+
+
+# ---------------------------------------------------------------------------
+# FTA — First Trouble Area
+# ---------------------------------------------------------------------------
+
+# Counter-trend zones that count as an obstacle, and how to read each one's
+# bounds out of its detector result. The trader's definition (Aug 2026): "FTA
+# includes counter-trend POI — FVG, OB, and their derivatives."
+_FTA_SOURCES: tuple[tuple[str, str, str, str], ...] = (
+    # (detector, list field, upper-bound key, lower-bound key)
+    ("detect_fvg", "fvgs", "upper", "lower"),
+    ("detect_ifvg", "ifvgs", "upper", "lower"),
+    ("detect_order_block", "obs", "high", "low"),
+    ("detect_breaker_block", "breakers", "high", "low"),
+    ("detect_mitigation_block", "blocks", "high", "low"),
+)
+
+
+def _fta_zone_is_counter(zone: dict, direction: str) -> bool:
+    """A long is obstructed by bearish zones, a short by bullish ones."""
+    ztype = str(zone.get("type", "")).lower()
+    if not ztype:
+        return True  # untyped zone — treat as an obstacle rather than ignore it
+    return ("bear" in ztype) if direction == "long" else ("bull" in ztype)
+
+
+def _tp_from_fta(
+    entry_price: float,
+    direction: str,
+    detector_cache: dict,
+    slice_df: pd.DataFrame,
+    registry: dict | None,
+) -> float | None:
+    """Near edge of the closest counter-trend POI in front of the trade.
+
+    "Near edge" is where price first enters the zone — the bottom of a zone
+    above a long, the top of a zone below a short. Targeting the far side would
+    assume the obstacle gets fully consumed, which is exactly what it might not do.
+    """
+    edges: list[float] = []
+
+    for detector, list_field, hi_key, lo_key in _FTA_SOURCES:
+        result = detector_cache.get(detector)
+        if result is None and registry is not None:
+            fn = registry.get(detector)
+            if fn is None:
+                continue
+            try:
+                result = fn(slice_df)
+            except Exception:
+                continue
+            detector_cache[detector] = result
+        if not isinstance(result, dict):
+            continue
+
+        for zone in result.get(list_field) or []:
+            if not isinstance(zone, dict):
+                continue
+            if zone.get("is_mitigated") or zone.get("fill_state") == "filled":
+                continue
+            if not _fta_zone_is_counter(zone, direction):
+                continue
+            hi, lo = zone.get(hi_key), zone.get(lo_key)
+            if hi is None or lo is None:
+                continue
+            near = float(lo) if direction == "long" else float(hi)
+            if direction == "long" and near > entry_price:
+                edges.append(near)
+            elif direction == "short" and near < entry_price:
+                edges.append(near)
+
+    if not edges:
+        return None
+    return min(edges) if direction == "long" else max(edges)
+
+
+def _sl_from_sweep_fractal(
+    entry_price: float,
+    direction: str,
+    slice_df: pd.DataFrame,
+    detector_cache: dict,
+    atr: float,
+) -> float:
+    """Stop behind the fractal that took the liquidity.
+
+    The trader's own placement (validated against the 1 Aug example: sweep at
+    21:00 Kyiv, stop 62275 = the low of the 03:30-later 3M fractal). The
+    previous "swing" mode put the stop behind an HOURLY swing while the entry
+    was made on 3M, inflating risk until most setups failed the 1.8R floor.
+
+    Falls back to the swept level itself, then to an ATR stop, so a missing
+    sweep record degrades instead of raising.
+    """
+    sign = -1 if direction == "long" else 1
+    buffer = atr * 0.1
+
+    liq = detector_cache.get("detect_liquidity") or {}
+    sweeps = liq.get("recent_sweeps") or []
+    if sweeps:
+        sweep = sweeps[0]
+        ts = sweep.get("sweep_ts")
+        # The sweep bar's own extreme is the fractal that did the taking.
+        if ts is not None:
+            try:
+                bar = slice_df.loc[pd.Timestamp(ts)]
+                extreme = float(bar["low"]) if direction == "long" else float(bar["high"])
+                return extreme + sign * buffer
+            except (KeyError, TypeError, ValueError):
+                pass
+        level = sweep.get("swept_level")
+        if level is not None:
+            return float(level) + sign * buffer
+
+    return entry_price + sign * atr * 1.5
+
+
+
+# Silver Bullet targets are "low hanging fruit" — the nearest opposing pool,
+# deliberately not stretched. Taken literally the nearest fractal is often
+# unreachable at min_rr (on the trader's 11-Aug example the nearest three paid
+# 0.74R / 0.97R / 1.02R against a 1.3 floor), and since min_rr is a hard gate on
+# opening a trade at all, the operative rule is "the nearest one that pays".
+#
+# max_results is raised well above the detector's default of 10: on 15m that
+# default spans only a few hours, and the trader's own pool on 11 Aug (63863.9)
+# fell outside it.
+_FRACTAL_TARGET_POOL = 60
+
+
+def _tp_nearest_fractal(
+    entry_price: float,
+    sl_price: float,
+    direction: str,
+    slice_df: pd.DataFrame,
+    detector_cache: dict,
+    registry: dict | None,
+    min_rr: float,
+) -> float | None:
+    """Nearest unbroken 3-candle fractal beyond entry that pays min_rr."""
+    risk = abs(entry_price - sl_price)
+    if risk <= 0:
+        return None
+
+    cache_key = f"detect_fractals_3_{_FRACTAL_TARGET_POOL}"
+    fractals = detector_cache.get(cache_key)
+    if fractals is None and registry is not None:
+        fn = registry.get("detect_fractals")
+        if fn is not None:
+            try:
+                fractals = fn(slice_df, bars="3", max_results=_FRACTAL_TARGET_POOL)
+                detector_cache[cache_key] = fractals
+            except Exception:
+                fractals = None
+
+    want = "swing_high" if direction == "long" else "swing_low"
+    levels = sorted(
+        (
+            float(f["price"])
+            for f in (fractals or {}).get("fractals", [])
+            if f.get("price") is not None
+            and not f.get("is_broken")
+            and f.get("type") == want
+            and (
+                float(f["price"]) > entry_price if direction == "long"
+                else float(f["price"]) < entry_price
+            )
+        ),
+        reverse=direction == "short",
+    )
+    for level in levels:                      # already ordered nearest-first
+        if abs(level - entry_price) / risk >= min_rr:
+            return level
+    return None
+
+def _tp_fractal_or_fta(
+    entry_price: float,
+    sl_price: float,
+    direction: str,
+    slice_df: pd.DataFrame,
+    detector_cache: dict,
+    registry: dict | None,
+    min_rr: float,
+    ignore_near_fta: bool = False,
+) -> float | None:
+    """1h3m target rule (trader's spec, 2026-08-22).
+
+    Targets are the **two nearest 3-candle fractals on the signal timeframe** —
+    no further. An FTA (counter-trend POI) in front of a target replaces it:
+    price is not expected to pass through the obstacle, so the trade is closed
+    at the obstacle's **near edge**, whatever R that pays.
+
+        FTA before the 1st fractal      → take the FTA (or skip if it pays < min_rr)
+        1st fractal pays min_rr         → take it
+        1st too close, FTA before 2nd   → take the FTA (or skip)
+        1st too close, 2nd pays min_rr  → take the 2nd
+        otherwise                       → skip
+
+    Returns None when nothing reachable pays min_rr; the caller skips the setup.
+    """
+    risk = abs(entry_price - sl_price)
+    if risk <= 0:
+        return None
+
+    def pays(level: float) -> bool:
+        return abs(level - entry_price) / risk >= min_rr
+
+    def beyond(level: float) -> bool:
+        return level > entry_price if direction == "long" else level < entry_price
+
+    def nearer(a: float, b: float) -> bool:
+        """Is a closer to entry than b, in the direction of the trade?"""
+        return a < b if direction == "long" else a > b
+
+    # ── the two nearest 3-candle fractals on the signal timeframe ────────
+    # max_results must be raised: the detector's default keeps the 10 most
+    # RECENT fractals, while this rule wants the two nearest in PRICE. An older
+    # but closer level simply fell out of the list, so the rule reached past it
+    # to a further target — or skipped the trade. Measured on the run-2 window:
+    # 11 of 41 target resolutions changed between the 10- and 60-fractal pools.
+    cache_key = f"detect_fractals_3_{_FRACTAL_TARGET_POOL}"
+    fractals = detector_cache.get(cache_key)
+    if fractals is None and registry is not None:
+        fn = registry.get("detect_fractals")
+        if fn is not None:
+            try:
+                fractals = fn(slice_df, bars="3", max_results=_FRACTAL_TARGET_POOL)
+                detector_cache[cache_key] = fractals
+            except Exception:
+                fractals = None
+
+    levels = sorted(
+        (
+            float(f["price"])
+            for f in (fractals or {}).get("fractals", [])
+            if f.get("price") is not None
+            and not f.get("is_broken")
+            and beyond(float(f["price"]))
+        ),
+        reverse=direction == "short",
+    )
+    first = levels[0] if levels else None
+    second = levels[1] if len(levels) > 1 else None
+
+    fta = _tp_from_fta(entry_price, direction, detector_cache, slice_df, registry)
+
+    # An FTA closer than min_rr is a wall the trade cannot be closed against.
+    # Two readings of the trader's rule live side by side, because his own
+    # reference trade contradicts the strict one:
+    #   "fractal_or_fta"      — strict: any POI in front kills the setup. On 1H
+    #       there is nearly always an FVG within a few dozen points, so this
+    #       skipped 34% of signals and the validated 1-Aug trade too, which was
+    #       vetoed by an imbalance 34 points above entry paying 0.16R.
+    #   "fractal_or_fta_soft" — a POI that cannot pay min_rr is noise and is
+    #       ignored, so an FTA can only pull the target NEARER, never veto the
+    #       trade. This is "if the FTA is beyond 1.8R, take its near edge" read
+    #       as "an FTA matters only from 1.8R onward".
+    if ignore_near_fta and fta is not None and not pays(fta):
+        fta = None
+
+    # ── an obstacle in front of the first target replaces it outright ────
+    if fta is not None and (first is None or nearer(fta, first)):
+        return fta if pays(fta) else None
+
+    if first is not None and pays(first):
+        return first
+
+    # First target too close: look one fractal further, but no further than that.
+    if fta is not None and (second is None or nearer(fta, second)):
+        return fta if pays(fta) else None
+
+    if second is not None and pays(second):
+        return second
+
+    return None

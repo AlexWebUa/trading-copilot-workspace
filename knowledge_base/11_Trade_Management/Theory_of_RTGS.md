@@ -2,9 +2,9 @@
 title: Theory of RTGS / Search Hunt
 tags: [rtgs, target2, search-hunt, sessions, timing, liquidity]
 aliases: [RTGS, Target2, Search Hunt, SH, Theory of RTGS]
-sources: [raw_notion/Theory_of_RTGS.md]
+sources: [raw_notion/Theory_of_RTGS.md, course-archiver/output/DT_MATERIAL_50/sessions-2/notion_6.md]
 status: defined
-updated: 2026-04-18
+updated: 2026-08-05
 ---
 
 # Theory of RTGS / Search Hunt

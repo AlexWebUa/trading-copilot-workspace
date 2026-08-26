@@ -2,9 +2,9 @@
 title: ICT Intraday Templates
 tags: [bias, ict, intraday, templates]
 aliases: [ICT Intraday Templates, Внутридневные шаблоны ICT]
-sources: [raw_notion/ICT_Intraday_Templates.md]
+sources: [raw_notion/ICT_Intraday_Templates.md, course-archiver/output/DT_MATERIAL_50/sessions-2/notion_1.md]
 status: defined
-updated: 2026-04-19
+updated: 2026-08-05
 ---
 
 # ICT Intraday Templates
