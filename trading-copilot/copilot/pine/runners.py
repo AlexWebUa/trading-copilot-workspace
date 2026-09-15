@@ -37,6 +37,7 @@ from copilot.detectors.market_structure import detect_market_structure
 from copilot.detectors.mitigation_block import detect_mitigation_block
 from copilot.detectors.multi_tf import check_multi_tf_alignment
 from copilot.detectors.order_block import detect_order_block
+from copilot.detectors.order_flow import detect_order_flow
 from copilot.detectors.rejection_block import detect_rejection_block
 from copilot.detectors.sessions import current_killzone
 from copilot.detectors.sponsored_candle import detect_sponsored_candle
@@ -122,6 +123,11 @@ def run(
         return detect_market_structure(df, **sl)
     if detector == "detect_volume_profile":
         return detect_volume_profile(df)
+    if detector == "detect_order_flow":
+        # 3-candle fractals and every event in the window: this layer exists to
+        # be checked bar by bar against the chart, so nothing is truncated.
+        return detect_order_flow(df, swing_lookback=1, max_events=10_000)
+
     if detector == "detect_fractals":
         return detect_fractals(df)
     if detector == "detect_fib_zones":
@@ -158,7 +164,7 @@ RUNNERS: dict[str, Callable[[EmitContext, RunDeps | None], dict]] = {
     for name in (
         "detect_fvg", "detect_ifvg", "detect_order_block", "detect_breaker_block",
         "detect_rejection_block", "detect_mitigation_block", "detect_sponsored_candle",
-        "detect_liquidity", "detect_bos", "detect_market_structure",
+        "detect_liquidity", "detect_bos", "detect_order_flow", "detect_market_structure",
         "detect_volume_profile", "detect_fractals", "detect_fib_zones",
         "detect_compression", "check_absorption_at_poi", "detect_cumulative_delta",
         "check_cd_divergence_at_structure", "current_killzone", "check_multi_tf_alignment",

@@ -1,0 +1,72 @@
+{
+  "bars": 17520,
+  "slices": 500,
+  "rows": [
+    {
+      "window": 1000,
+      "seconds": 2.2,
+      "direction": 1.0,
+      "confirmed": 1.0,
+      "confirmations": 1.0,
+      "entries_allowed": 0.894,
+      "key_high": 1.0,
+      "key_low": 1.0,
+      "pool_level": 0.554
+    },
+    {
+      "window": 2000,
+      "seconds": 4.6,
+      "direction": 1.0,
+      "confirmed": 1.0,
+      "confirmations": 1.0,
+      "entries_allowed": 0.946,
+      "key_high": 1.0,
+      "key_low": 1.0,
+      "pool_level": 0.766
+    },
+    {
+      "window": 3000,
+      "seconds": 7.3,
+      "direction": 1.0,
+      "confirmed": 1.0,
+      "confirmations": 1.0,
+      "entries_allowed": 0.968,
+      "key_high": 1.0,
+      "key_low": 1.0,
+      "pool_level": 0.858
+    },
+    {
+      "window": 4000,
+      "seconds": 10.4,
+      "direction": 1.0,
+      "confirmed": 1.0,
+      "confirmations": 1.0,
+      "entries_allowed": 0.984,
+      "key_high": 1.0,
+      "key_low": 1.0,
+      "pool_level": 0.91
+    },
+    {
+      "window": 6000,
+      "seconds": 17.5,
+      "direction": 1.0,
+      "confirmed": 1.0,
+      "confirmations": 1.0,
+      "entries_allowed": 1.0,
+      "key_high": 1.0,
+      "key_low": 1.0,
+      "pool_level": 0.98
+    },
+    {
+      "window": 8000,
+      "seconds": 26.0,
+      "direction": 1.0,
+      "confirmed": 1.0,
+      "confirmations": 1.0,
+      "entries_allowed": 1.0,
+      "key_high": 1.0,
+      "key_low": 1.0,
+      "pool_level": 0.998
+    }
+  ]
+}

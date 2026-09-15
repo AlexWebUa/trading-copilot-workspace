@@ -10,3 +10,6 @@ __pycache__/
 .env
 .venv/
 .venv_mcp/
+
+# Raw run logs; the JSON results beside them are what the docs cite
+research/runs/logs/

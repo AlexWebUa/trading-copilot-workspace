@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-debug_detectors.py — fetch BTCUSDT spot data, run every detector,
+debug_detectors.py — fetch BTCUSDT data (futures by default), run every detector,
 and write one .pine file (+ one .json raw-result file) per detector
 for TradingView visual debugging.
 
@@ -53,6 +53,15 @@ from copilot.pine.emitters import EmitContext, assemble, emit, file_header
 from copilot.pine.runners import HTF_MAP, NEEDS_DELTA, NEEDS_HTF, NEEDS_MS, RunDeps
 from copilot.pine.runners import run as run_detector
 
+# Windows consoles default to a legacy codepage (cp1251 here), and this script
+# prints "×", "→" and Cyrillic detector notes — enough to kill the run with
+# UnicodeEncodeError before a single line of Pine is written. Reconfiguring the
+# streams is the fix; stripping the characters would just move the problem.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+
+
 # Canonical order — used for --list and validation
 _ALL_DETECTOR_NAMES: list[str] = [
     "detect_fvg",
@@ -63,6 +72,7 @@ _ALL_DETECTOR_NAMES: list[str] = [
     "detect_mitigation_block",
     "detect_liquidity",
     "detect_bos",
+    "detect_order_flow",
     "detect_volume_profile",
     "detect_market_structure",
     "detect_fractals",
@@ -112,10 +122,16 @@ _QUARANTINED = {n for n, s in _DETECTOR_STATUS.items() if s.startswith("QUARANTI
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Run detectors on BTCUSDT spot and write one Pine Script file per detector.",
+        description="Run detectors on Binance data and write one Pine Script file per detector.",
         formatter_class=argparse.RawTextHelpFormatter,
     )
     parser.add_argument("--symbol",   default="BTCUSDT", help="Trading pair (default: BTCUSDT)")
+    # Was hard-coded to spot. The research frame is Perpetual Futures
+    # (RESEARCH_PROTOCOL 2.1) and the trader's charts are futures, so every
+    # visual check made against spot was checking a different instrument than
+    # the backtest ran on — the same level can differ by ~100 points.
+    parser.add_argument("--market",   default="futures", choices=("futures", "spot"),
+                        help="Binance market (default: futures — matches the research frame)")
     parser.add_argument("--tf",       default="30m",
                         choices=sorted(VALID_TIMEFRAMES),
                         help="Timeframe (default: 30m)")
@@ -165,8 +181,9 @@ def main() -> None:
 
     htf = HTF_MAP.get(tf, "4h")
 
-    print(f"Fetching {symbol} spot — {tf} × {bars} bars …")
-    source = BinanceSource(market="spot")
+    market = args.market
+    print(f"Fetching {symbol} {market} — {tf} × {bars} bars …")
+    source = BinanceSource(market=market)
     df = source.get_ohlc(symbol, tf, bars)
     print(f"  OK — {len(df)} bars  {df.index[0]}  →  {df.index[-1]}")
 
@@ -174,7 +191,7 @@ def main() -> None:
     if active_names & NEEDS_DELTA:
         print(f"Fetching delta data ({tf}) …")
         try:
-            df_delta = fetch_ohlcv_with_delta(symbol, tf, bars, market="spot")
+            df_delta = fetch_ohlcv_with_delta(symbol, tf, bars, market=market)
             print(f"  OK — delta columns: {list(df_delta.columns)}")
         except Exception as exc:
             print(f"  WARNING: delta fetch failed ({exc}). CD detectors will show error label.")

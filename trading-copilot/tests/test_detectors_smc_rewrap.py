@@ -60,7 +60,8 @@ class TestMarketStructure:
         confirmed close-break event changes state."""
         ms = detect_market_structure(_uptrend_with_pullback(), swing_lookback=2)
         assert ms["state"] == "bullish"
-        assert ms["last_bos_type"] == "BOS"
+        # Continuation of an uptrend = cBOS under the trader's naming.
+        assert ms["last_bos_type"] == "cBOS"
 
     def test_flat_market_is_ranging(self):
         df = _mk([_bar(100, 101, 99, 100) for _ in range(40)])
@@ -79,9 +80,10 @@ class TestMarketStructure:
 # ---------------------------------------------------------------------------
 
 class TestBos:
-    def test_textbook_bullish_bos_detected(self):
+    def test_textbook_bullish_continuation_detected(self):
         """Close above the prior swing high (102) after a higher low must emit
-        a bullish BOS at that level — the old code returned noise cBOS only."""
+        a bullish CONTINUATION (cBOS) at that level — the old code returned
+        noise reversal events only."""
         rows = [_bar(100, 101, 99, 100.2) for _ in range(8)]
         rows += [_bar(100, 100.4, 96.0, 96.5)]
         rows += [_bar(96.5, 97.5, 96.2, 97.2) for _ in range(3)]
@@ -92,7 +94,7 @@ class TestBos:
         r = detect_bos(_mk(rows), swing_lookback=3)
 
         assert any(
-            e["type"] == "BOS" and e["direction"] == "bullish"
+            e["type"] == "cBOS" and e["direction"] == "bullish"
             and abs(e["broken_level"] - 102) < 0.01
             for e in r["events"]
         ), r["events"]

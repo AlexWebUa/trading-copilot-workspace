@@ -1,0 +1,43 @@
+{
+  "symbol": "BTCUSDT",
+  "tf": "30m",
+  "bars": 52600,
+  "stage": "1",
+  "start": "2023-08-28T00:00:00Z",
+  "end": "2026-08-27T00:00:00Z",
+  "fee_bps": 4.0,
+  "slippage_bps": 2.0,
+  "of_lookback": 8000,
+  "min_stop_atr": null,
+  "arms": {
+    "of30_fvg_short": {
+      "symbol": "BTCUSDT",
+      "tf": "30m",
+      "start": "2023-08-29T01:00:00Z",
+      "end": "2026-08-27T00:00:00Z",
+      "signals": 318,
+      "trades": 80,
+      "skipped_rr": 66,
+      "skipped_entry": 172,
+      "unfinished": 0,
+      "wins": 28,
+      "losses": 52,
+      "winrate": 0.35,
+      "winrate_ci": [
+        0.2545,
+        0.4592
+      ],
+      "expectancy": 0.362,
+      "expectancy_ci": [
+        -0.264,
+        1.027
+      ],
+      "profit_factor": 1.37,
+      "avg_bars_in_trade": 8.2,
+      "max_consec_losses": 7,
+      "total_pnl_pct": 28.963,
+      "seconds": 2408.5,
+      "verdict": "\u043d\u0435\u043e\u0442\u043b\u0438\u0447\u0438\u043c\u043e \u043e\u0442 \u043d\u0443\u043b\u044f"
+    }
+  }
+}

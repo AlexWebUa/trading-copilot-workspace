@@ -17,7 +17,7 @@ from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 
-from copilot.backtest.engine import BacktestEngine
+from copilot.backtest.engine import _MIN_LEADING_BARS, BacktestEngine
 from copilot.backtest.rules import Condition, HTFCondition, SetupRule
 from copilot.data.normalize import normalize_binance, normalize_binance_with_delta
 
@@ -1225,3 +1225,98 @@ def test_engine_skips_setups_whose_stop_is_already_behind_price():
         f"{summary.total_trades} trades opened with the stop on the wrong side of entry"
     )
     assert summary.skipped_rr > 0
+
+
+# ---------------------------------------------------------------------------
+# R-12 — SL/TP resolution must not see bars that close after the fill
+# ---------------------------------------------------------------------------
+
+def _r12_engine(spy):
+    """Engine whose only target-resolving detector is `spy`.
+
+    HTF 1h, LTF 5m, conditions trivially true on both sides, so a signal fires
+    on the first eligible bar and the fill lands on the first LTF bar after it.
+    """
+    htf = _make_hourly_df(n=70)
+    ltf = _make_minutes_df(
+        n=70 * 12 + 20, step_min=5,
+        start=datetime(2026, 4, 1, 10, tzinfo=timezone.utc),
+    )
+    rule = SetupRule(
+        name="r12_asof",
+        direction="long",
+        conditions=[Condition("detect_fvg", "count_active", "gte", 0)],
+        entry_after="signal_close",
+        sl_logic="pct:1.0",
+        tp_logic="nearest_fractal",
+        min_rr=0.1,
+        entry_tf="5m",
+        entry_conditions=[Condition("detect_fvg", "count_active", "gte", 0)],
+        entry_after_ltf="signal_close",
+        max_entry_wait_bars_ltf=200,
+    )
+    engine = BacktestEngine(
+        source=_MultiTFSource({"1h": htf, "5m": ltf}),
+        detector_registry={
+            "detect_fvg": lambda df, **k: {"count_active": 0},
+            "detect_fractals": spy,
+        },
+    )
+    return engine, rule
+
+
+def test_target_resolution_never_sees_a_bar_that_closes_after_entry():
+    """R-12: the HTF frame handed to resolve_sl / resolve_tp is as-of the fill.
+
+    The LTF bars of hour H are scanned when the HTF cursor reaches H+1, so
+    `df.iloc[:i+1]` ended 1:00-1:51 AFTER the fill. Targets are 3-candle HTF
+    fractals, and one centred on H is confirmed only when H+1 closes — the
+    engine was choosing between levels that did not exist yet.
+    """
+    seen: list[pd.Timestamp] = []
+
+    def spy(df, **kw):
+        seen.append(df.index[-1])
+        # A reachable target so the trade actually opens.
+        return {"fractals": [{"price": 140.0, "type": "swing_high", "is_broken": False}]}
+
+    engine, rule = _r12_engine(spy)
+    summary = engine.run("BTCUSDT", "1h", rule, bars=70, write_journal=False)
+
+    assert summary.trades, "no trade opened — the guard would be vacuous"
+    assert seen, "detect_fractals was never called: tp_logic did not resolve"
+
+    entry_ts = pd.Timestamp(summary.trades[0].ts_entry.replace("Z", "+00:00"))
+    entry_known_at = entry_ts + pd.Timedelta(minutes=5)   # the 5m bar's close
+
+    # index[-1] is an OPEN time; the bar is information only once it closes.
+    latest_close = max(seen) + pd.Timedelta(hours=1)
+    assert latest_close <= entry_known_at, (
+        f"resolver saw an HTF bar closing {latest_close}, but the fill was "
+        f"decided at {entry_known_at} — {latest_close - entry_known_at} of "
+        "future price action. R-12 is back."
+    )
+
+
+def test_target_resolution_still_gets_the_signal_bar():
+    """The as-of cut must not be so tight that it starves the resolver.
+
+    `sl_logic="sweep_fractal"` looks the sweep bar up BY TIMESTAMP in this same
+    frame, so a cut that dropped the signal bar would silently fall through to
+    the ATR fallback and quietly change every stop.
+    """
+    seen: list[int] = []
+
+    def spy(df, **kw):
+        seen.append(len(df))
+        return {"fractals": [{"price": 140.0, "type": "swing_high", "is_broken": False}]}
+
+    engine, rule = _r12_engine(spy)
+    summary = engine.run("BTCUSDT", "1h", rule, bars=70, write_journal=False)
+
+    assert summary.trades, "no trade opened"
+    assert min(seen) > 0, "the as-of slice came back empty"
+    # The signal bar closes exactly when the LTF scan starts, so it is in.
+    assert min(seen) >= _MIN_LEADING_BARS, (
+        f"as-of slice shrank to {min(seen)} bars — detectors need history"
+    )

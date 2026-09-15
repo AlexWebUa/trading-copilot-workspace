@@ -7,6 +7,14 @@ import pandas as pd
 # and nothing in the stack could fetch a weekly bar.
 VALID_TIMEFRAMES = {"1m", "3m", "5m", "15m", "30m", "1h", "4h", "1d", "1w"}
 
+# Bar length in minutes. Lives here rather than in the backtest engine because
+# the data layer needs it too (sizing a batched fetch window in milliseconds),
+# and a second copy is a second thing to forget when a timeframe is added.
+TF_MINUTES = {
+    "1m": 1, "3m": 3, "5m": 5, "15m": 15,
+    "30m": 30, "1h": 60, "4h": 240, "1d": 1440, "1w": 10080,
+}
+
 
 @runtime_checkable
 class DataSource(Protocol):

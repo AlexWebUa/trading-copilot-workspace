@@ -44,7 +44,14 @@ _VALID_OPS = frozenset(
 )
 _VALID_DIRECTIONS = frozenset({"long", "short"})
 _VALID_REF_NAMESPACES = frozenset({"self", "signal"})
-_VALID_ENTRY_AFTER = frozenset({"next_open", "signal_close", "fvg_ce", "ob_midpoint"})
+# 30mOF POI entries: "<source>_near" fills at the near edge on touch,
+# "<source>_full" waits for the zone to be filled completely. Source is
+# poi (nearest of any kind) | fvg | bpr | ob | stb_bts.
+_POI_ENTRY_SOURCES = ("poi", "fvg", "bpr", "ob", "stb_bts")
+_VALID_ENTRY_AFTER = frozenset(
+    {"next_open", "signal_close", "fvg_ce", "ob_midpoint"}
+    | {f"{src}_{kind}" for src in _POI_ENTRY_SOURCES for kind in ("near", "full")}
+)
 # "fvg_near" rests a limit on the near edge of the imbalance printed during
 # the LTF confirmation and fills only if price trades back into it — the
 # "test" entry of Silver Bullet, as opposed to filling at market.
@@ -283,6 +290,10 @@ class SetupRule:
     invalidation_conditions: list[Condition] = field(default_factory=list)
     entry_after_ltf: str = "signal_close"
     max_entry_wait_bars_ltf: int = 50
+    # How long a limit entry on the SIGNAL timeframe stays live. Was hard-coded
+    # to 10 inside resolve_entry, which is fine for fvg_ce on 1h and far too
+    # short for a 30m POI retracement.
+    max_entry_wait_bars: int = 10
     # Change 3: Partial TP
     tp_levels: list[TPLevel] = field(default_factory=list)
     sl_after_tp1: str | None = None
@@ -296,6 +307,13 @@ class SetupRule:
     min_rr: float = 1.8
     fee_bps: float = 0.0
     slippage_bps: float = 0.0
+    # Widen a structural stop that came out tighter than this many ATR. A
+    # structural stop is pinned to a level, so an entry sitting on that level
+    # leaves near-zero risk — and near-zero risk clears `min_rr` more easily
+    # than real risk does, so those trades take over the sample instead of
+    # being filtered out. Measured on 30mOF 2026-08-27; see `resolve_sl`.
+    # 0.0 = off, which is what every setup but 30mOF uses.
+    min_stop_atr: float = 0.0
     # Change 6: Variable risk
     risk_pct: float = 1.0
 
@@ -342,12 +360,14 @@ class SetupRule:
             "invalidation_conditions": [c.to_dict() for c in self.invalidation_conditions],
             "entry_after_ltf": self.entry_after_ltf,
             "max_entry_wait_bars_ltf": self.max_entry_wait_bars_ltf,
+            "max_entry_wait_bars": self.max_entry_wait_bars,
             "tp_levels": [t.to_dict() for t in self.tp_levels],
             "sl_after_tp1": self.sl_after_tp1,
             "max_bars_open": self.max_bars_open,
             "min_rr": self.min_rr,
             "fee_bps": self.fee_bps,
             "slippage_bps": self.slippage_bps,
+            "min_stop_atr": self.min_stop_atr,
             "risk_pct": self.risk_pct,
         }
 
@@ -376,12 +396,14 @@ class SetupRule:
             ],
             entry_after_ltf=d.get("entry_after_ltf", "signal_close"),
             max_entry_wait_bars_ltf=d.get("max_entry_wait_bars_ltf", 50),
+            max_entry_wait_bars=d.get("max_entry_wait_bars", 10),
             tp_levels=[TPLevel.from_dict(t) for t in d.get("tp_levels", [])],
             sl_after_tp1=d.get("sl_after_tp1"),
             max_bars_open=d.get("max_bars_open"),
             min_rr=d.get("min_rr", 1.8),
             fee_bps=d.get("fee_bps", 0.0),
             slippage_bps=d.get("slippage_bps", 0.0),
+            min_stop_atr=d.get("min_stop_atr", 0.0),
             risk_pct=d.get("risk_pct", 1.0),
         )
 

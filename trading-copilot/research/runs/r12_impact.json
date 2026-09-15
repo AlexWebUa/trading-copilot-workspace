@@ -1,0 +1,97 @@
+{
+  "bars": 5000,
+  "arms": {
+    "bellissimo_1h3m_long": {
+      "fixed": {
+        "signals": 641,
+        "trades": 7,
+        "skipped_rr": 224,
+        "skipped_entry": 409,
+        "wins": 3,
+        "losses": 4,
+        "unfinished": 0,
+        "winrate": 0.4286,
+        "winrate_ci": [
+          0.1582,
+          0.7495
+        ],
+        "expectancy": 0.555,
+        "expectancy_ci": [
+          -1.0,
+          2.086
+        ],
+        "profit_factor": 1.97,
+        "start": "2026-02-01T08:00:00Z",
+        "end": "2026-08-26T12:00:00Z"
+      },
+      "prefix": {
+        "signals": 635,
+        "trades": 11,
+        "skipped_rr": 216,
+        "skipped_entry": 407,
+        "wins": 8,
+        "losses": 3,
+        "unfinished": 0,
+        "winrate": 0.7273,
+        "winrate_ci": [
+          0.4343,
+          0.9025
+        ],
+        "expectancy": 1.43,
+        "expectancy_ci": [
+          0.481,
+          2.217
+        ],
+        "profit_factor": 6.243,
+        "start": "2026-02-01T08:00:00Z",
+        "end": "2026-08-26T12:00:00Z"
+      }
+    },
+    "bellissimo_1h3m_short": {
+      "fixed": {
+        "signals": 600,
+        "trades": 19,
+        "skipped_rr": 254,
+        "skipped_entry": 327,
+        "wins": 5,
+        "losses": 14,
+        "unfinished": 0,
+        "winrate": 0.2632,
+        "winrate_ci": [
+          0.1181,
+          0.4879
+        ],
+        "expectancy": -0.012,
+        "expectancy_ci": [
+          -0.7,
+          0.827
+        ],
+        "profit_factor": 0.984,
+        "start": "2026-02-01T08:00:00Z",
+        "end": "2026-08-26T12:00:00Z"
+      },
+      "prefix": {
+        "signals": 604,
+        "trades": 15,
+        "skipped_rr": 259,
+        "skipped_entry": 330,
+        "wins": 4,
+        "losses": 11,
+        "unfinished": 0,
+        "winrate": 0.2667,
+        "winrate_ci": [
+          0.109,
+          0.5195
+        ],
+        "expectancy": 0.065,
+        "expectancy_ci": [
+          -0.756,
+          1.083
+        ],
+        "profit_factor": 1.089,
+        "start": "2026-02-01T08:00:00Z",
+        "end": "2026-08-26T12:00:00Z"
+      }
+    }
+  }
+}

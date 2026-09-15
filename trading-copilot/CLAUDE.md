@@ -174,6 +174,11 @@ so `cli.py` never branches.
   `tests/test_probe_regression.py`. A bug whose fix hasn't landed is `xfail(strict=True)` with a `reason`
   citing the PLAN item — it goes green (XPASS, failing the suite) the moment the fix lands, forcing the
   marker's removal. Use the same pattern for any new known-broken-detector test.
+- **`cBOS` is continuation, `BOS` is the structure break (слом).** The trader's
+  convention, per the KB glossary; `smartmoneyconcepts` uses the opposite one and
+  `smc_lib.structure_events` swaps it exactly once. Guarded by
+  `test_continuation_is_named_cbos_not_bos` — an inverted structural term does not
+  raise, it encodes the opposite setup.
 - Internal computation uses integer DataFrame-position `idx`, not timestamps; ISO 8601 strings only in
   output. ATR is per-bar true-range (`smc_lib.true_range_atr`) — never a static scalar in a loop.
   Swing detection deduplicates to strict H-L-H-L alternation, but break detection must consume swings

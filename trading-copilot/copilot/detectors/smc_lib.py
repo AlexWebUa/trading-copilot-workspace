@@ -69,10 +69,19 @@ def confirmed_swings(shl: pd.DataFrame, df: pd.DataFrame) -> list[dict]:
 def structure_events(df: pd.DataFrame, shl: pd.DataFrame) -> list[dict]:
     """Confirmed BOS/CHoCH events from smc.bos_choch, oldest-first.
 
-    Each event: {"type": "BOS"|"cBOS", "direction": "bullish"|"bearish",
+    Each event: {"type": "cBOS"|"BOS", "direction": "bullish"|"bearish",
     "level": float, "swing_idx": int, "break_idx": int}.
     Only events whose level was actually broken by a candle CLOSE are
     returned (the library drops unconfirmed ones).
+
+    **Naming follows the trader's knowledge base, not the library.** The KB
+    glossary defines a Key High/Low as one whose break "подтверждает (cBOS) или
+    ломает (BOS) структуру" — so cBOS is CONTINUATION and BOS is the REVERSAL.
+    `smartmoneyconcepts` uses the opposite convention (its BOS is continuation,
+    its CHOCH is the reversal), so the two are swapped exactly here, in one
+    place. Do not "fix" this back: every setup spec, every KB note and the
+    trader's own vocabulary use the KB convention, and an inverted term is the
+    kind of defect that yields plausible numbers instead of an error.
     """
     ev = smc.bos_choch(df, shl, close_break=True)
     bos = ev["BOS"].values
@@ -84,10 +93,10 @@ def structure_events(df: pd.DataFrame, shl: pd.DataFrame) -> list[dict]:
     for i in range(len(df)):
         if not np.isnan(bos[i]):
             sign = bos[i]
-            ev_type = "BOS"
+            ev_type = "cBOS"        # library "BOS" = continuation = our cBOS
         elif not np.isnan(choch[i]):
             sign = choch[i]
-            ev_type = "cBOS"  # CHoCH in smc terms
+            ev_type = "BOS"         # library "CHOCH" = reversal = our BOS
         else:
             continue
         if np.isnan(broken[i]):

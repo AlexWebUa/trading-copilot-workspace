@@ -107,7 +107,7 @@ class TestScriptShape:
     def test_header_names_symbol_and_timeframe(self):
         df = _make_rich_df()
         script = generate_pine_script(df, "ETHUSDT", "4h", detectors=["detect_fvg"])["pine_script"]
-        assert '//@version=5' in script
+        assert '//@version=6' in script
         assert 'indicator("Co-Pilot: ETHUSDT 4h"' in script
 
     def test_anchor_declared_once_at_global_scope(self):
