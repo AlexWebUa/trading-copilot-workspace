@@ -1,0 +1,68 @@
+{
+  "symbol": "BTCUSDT",
+  "tf": "30m",
+  "bars": 17520,
+  "stage": 1,
+  "start": "2025-08-27T12:00:00Z",
+  "end": "2026-08-27T00:00:00Z",
+  "arms": {
+    "of30_bpr_long": {
+      "symbol": "BTCUSDT",
+      "tf": "30m",
+      "start": "2025-08-28T13:00:00Z",
+      "end": "2026-08-27T00:00:00Z",
+      "signals": 240,
+      "trades": 2,
+      "skipped_rr": 0,
+      "skipped_entry": 238,
+      "unfinished": 0,
+      "wins": 0,
+      "losses": 2,
+      "winrate": 0.0,
+      "winrate_ci": [
+        0.0,
+        0.6576
+      ],
+      "expectancy": -1.0,
+      "expectancy_ci": [
+        -1.0,
+        -1.0
+      ],
+      "profit_factor": 0.0,
+      "avg_bars_in_trade": 41.5,
+      "max_consec_losses": 2,
+      "total_pnl_pct": -2.0,
+      "seconds": 1173.1,
+      "verdict": "\u043c\u0430\u043b\u043e \u0441\u0434\u0435\u043b\u043e\u043a (n=2)"
+    },
+    "of30_bpr_short": {
+      "symbol": "BTCUSDT",
+      "tf": "30m",
+      "start": "2025-08-28T13:00:00Z",
+      "end": "2026-08-27T00:00:00Z",
+      "signals": 256,
+      "trades": 1,
+      "skipped_rr": 0,
+      "skipped_entry": 255,
+      "unfinished": 0,
+      "wins": 0,
+      "losses": 1,
+      "winrate": 0.0,
+      "winrate_ci": [
+        0.0,
+        0.7935
+      ],
+      "expectancy": -1.0,
+      "expectancy_ci": [
+        -1.0,
+        -1.0
+      ],
+      "profit_factor": 0.0,
+      "avg_bars_in_trade": 12.0,
+      "max_consec_losses": 1,
+      "total_pnl_pct": -1.0,
+      "seconds": 1170.2,
+      "verdict": "\u043c\u0430\u043b\u043e \u0441\u0434\u0435\u043b\u043e\u043a (n=1)"
+    }
+  }
+}

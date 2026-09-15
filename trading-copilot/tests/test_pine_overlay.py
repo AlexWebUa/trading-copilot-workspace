@@ -1,6 +1,7 @@
 """Tests for copilot/pine/ — layer registry, overlay assembly, artifact persistence."""
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -10,6 +11,7 @@ from copilot.llm.tools import _ARTIFACT_TOOLS, _QUARANTINED_TOOLS, ToolRegistry
 from copilot.pine.emitters import EMITTERS, EmitContext, emit
 from copilot.pine.overlay import OVERLAY_LAYERS, build_overlay, layer_toggle
 from copilot.pine.runners import RUNNERS
+from copilot.pine.emitters import assemble, file_header
 from copilot.pine.store import list_recent_pine, pine_dir, save_pine
 
 
@@ -77,7 +79,7 @@ class TestBuildOverlay:
     def test_no_layers_still_emits_a_valid_header(self, fvg_bullish_df):
         script, counts = build_overlay("BTCUSDT", "1h", [], {}, self._ctx(fvg_bullish_df))
         assert counts == {}
-        assert "//@version=5" in script
+        assert "//@version=6" in script
         assert "if barstate.islast" not in script
 
     def test_no_top_level_only_constructs_inside_layer_blocks(self, fvg_bullish_df):
@@ -111,7 +113,11 @@ class TestArtifactStore:
     def test_list_recent_returns_newest_first(self):
         first = save_pine("BTCUSDT", "1h", "// one")
         second = save_pine("BTCUSDT", "4h", "// two")
-        second.touch()
+        # touch() is not enough: on Windows both writes land in the same
+        # filesystem timestamp tick, the sort is stable, and glob order then
+        # decides — putting the alphabetically-first name on top.
+        newer = first.stat().st_mtime + 10
+        os.utime(second, (newer, newer))
         assert list_recent_pine(2)[0] == second
         assert set(list_recent_pine(5)) == {first, second}
 
@@ -139,7 +145,7 @@ class TestRegistryIntegration:
         assert "pine_script" not in result, "raw Pine must not reach the model's context"
         saved = Path(result["pine_file"])
         assert saved.exists()
-        assert "//@version=5" in saved.read_text(encoding="utf-8")
+        assert "//@version=6" in saved.read_text(encoding="utf-8")
         assert result["layer_counts"]["detect_fvg"] == detect_fvg(fvg_bullish_df)["count_active"]
 
     def test_generate_pine_script_is_the_only_artifact_tool(self):
@@ -224,3 +230,86 @@ class TestAlertConditions:
             self._ctx(liquidity_sweep_df),
         )
         assert "BSL Sweep" not in script
+
+
+# ---------------------------------------------------------------------------
+# Pine compile limits (2026-08-26) — found by TradingView refusing the script
+# ---------------------------------------------------------------------------
+
+class TestAssembleCompileLimits:
+    """Both failures here reach the trader as "cannot add to chart", not as a
+    Python error, so they have to be caught on this side."""
+
+    @staticmethod
+    def _body(n_events: int) -> list[str]:
+        body: list[str] = []
+        for i in range(n_events):
+            body.append(f'    line.new({i}, 1.0, {i + 1}, 1.0, xloc=xloc.bar_time)')
+            body.append('    if show_labels')
+            body.append(f'        label.new({i + 1}, 1.0, "x", xloc=xloc.bar_time)')
+        return body
+
+    def _blocks(self, script: str) -> list[list[str]]:
+        blocks: list[list[str]] = []
+        current: list[str] | None = None
+        for line in script.splitlines():
+            if line == "if barstate.islast":
+                current = []
+                blocks.append(current)
+            elif current is not None and line.strip():
+                current.append(line)
+        return blocks
+
+    def test_long_body_is_split_so_no_if_exceeds_the_limit(self):
+        """Pine rejects a single `if` past a few hundred statements."""
+        from copilot.pine.emitters import _MAX_IF_BLOCK_LINES
+
+        script = assemble(file_header("BTCUSDT", "30m", "detect_order_flow", 50),
+                          self._body(200))
+        blocks = self._blocks(script)
+
+        assert len(blocks) > 1, "600-line body was left in one if statement"
+        longest = max(len(b) for b in blocks)
+        assert longest <= _MAX_IF_BLOCK_LINES + 2, (
+            f"a block still carries {longest} statements"
+        )
+
+    def test_split_never_orphans_a_nested_statement(self):
+        """A break between `if show_labels` and its label.new is a syntax error."""
+        script = assemble(file_header("BTCUSDT", "30m", "detect_order_flow", 50),
+                          self._body(200))
+        for block in self._blocks(script):
+            assert not block[0].startswith("        "), (
+                f"block opens on a nested line: {block[0]!r}"
+            )
+        lines = script.splitlines()
+        for i, line in enumerate(lines):
+            if line.strip() == "if show_labels":
+                nxt = next(l for l in lines[i + 1:] if l.strip())
+                assert nxt.startswith("        "), (
+                    "`if show_labels` lost its body to a block split"
+                )
+
+    def test_short_body_is_left_as_one_block(self):
+        script = assemble(file_header("BTCUSDT", "30m", "detect_fvg", 50), self._body(3))
+        assert script.count("if barstate.islast") == 1
+
+    def test_anchor_is_dropped_when_the_body_never_uses_it(self):
+        """Pine warns on a declared-but-unused variable, which reads as broken."""
+        script = assemble(file_header("BTCUSDT", "30m", "detect_order_flow", 50),
+                          self._body(2))
+        assert "anchor" not in script
+
+    def test_anchor_survives_and_repeats_for_bar_offset_layers(self):
+        """Layers that DO use anchor need it declared in every split block —
+        Pine v6 scopes a variable to the `if` it was declared in."""
+        from copilot.pine.emitters import _MAX_IF_BLOCK_LINES
+
+        body = [f'    box.new(anchor-{i}, 1.0, anchor+50, 0.5)' for i in range(400)]
+        script = assemble(file_header("BTCUSDT", "30m", "detect_fvg", 50), body)
+        blocks = self._blocks(script)
+        assert len(blocks) > 1
+        assert all(b[0].strip().startswith("anchor =") for b in blocks), (
+            "a split block references anchor without declaring it"
+        )
+        assert max(len(b) for b in blocks) <= _MAX_IF_BLOCK_LINES + 2

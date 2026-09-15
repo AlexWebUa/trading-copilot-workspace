@@ -15,9 +15,9 @@ def _make_df(rows, freq="1h"):
     return df[["open", "high", "low", "close", "volume"]]
 
 
-def _cbos_bullish_df():
+def _bos_bullish_df():
     """
-    Bullish cBOS: pattern ["low","high","low","high"] where C < A (LL) and D > B (HH).
+    Bullish BOS (слом): pattern ["low","high","low","high"] where C < A (LL) and D > B (HH).
     L1=90 → H1=100 → L2=85 (LL) → H2=110 (HH)
     """
     rows = []
@@ -45,13 +45,14 @@ def test_bearish_structure_detected(bearish_trend_df):
     assert result["state"] == "bearish"
 
 
-def test_cbos_state_still_directional():
-    df = _cbos_bullish_df()
+def test_bos_state_still_directional():
+    """A structure break leaves a direction, never 'ranging'."""
+    df = _bos_bullish_df()
     result = detect_market_structure(df, swing_lookback=3)
     assert result.get("state") in ("bullish", "bearish"), (
-        f"expected bullish/bearish after cBOS, got {result.get('state')}"
+        f"expected bullish/bearish after BOS, got {result.get('state')}"
     )
-    assert result.get("last_bos_type") == "cBOS"
+    assert result.get("last_bos_type") == "BOS"
 
 
 def test_flat_market_returns_ranging(flat_df):

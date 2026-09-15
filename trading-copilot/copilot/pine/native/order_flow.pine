@@ -1,0 +1,141 @@
+// 30mOF — Order Flow structure (native)
+//
+// Computes the trader's structural walk ON THE CHART'S OWN BARS instead of
+// baking coordinates in from Python. Three earlier attempts shipped hardcoded
+// `anchor - N` offsets and then absolute timestamps; both drift the moment the
+// live chart holds a different amount of history than the generated file, and
+// the drawings end up floating off their candles. A native implementation
+// cannot be misaligned — every line is anchored to the bar_index it was
+// computed from.
+//
+// Rules (trader, 2026-08-26), verified against his 25-27 July markup:
+//   * Fractal = 3 candles, confirmed one bar after the pivot prints.
+//   * A key point is broken by a candle BODY close, never by a wick.
+//   * cBOS = continuation (body close beyond the key in the flow's direction).
+//     BOS  = the break that ends the structure and starts a new flow.
+//   * After a break, the new key is the NEAREST fractal in that direction —
+//     not the extreme of the leg (27 Jul: structure continued on the 01:00
+//     candle but the key high is the 02:00 fractal).
+//   * The counter key is the FIRST fractal printed after the key, then frozen.
+//
+//@version=6
+indicator("30mOF — Order Flow structure", overlay = true,
+          max_lines_count = 500, max_labels_count = 500)
+
+showLabels = input.bool(true,  "Подписи событий")
+showKeys   = input.bool(true,  "Линии текущих ключевых точек")
+cUp        = input.color(color.new(#000000, 0), "Вверх")
+cDn        = input.color(color.new(#f7525f, 0), "Вниз")
+
+// ── state ─────────────────────────────────────────────────────────────────
+var float keyH   = na          // key high: a body close above it = up event
+var int   keyHb  = na
+var float keyL   = na          // key low
+var int   keyLb  = na
+var float spanL  = na          // lowest fractal low since the key high
+var int   spanLb = na
+var float spanH  = na          // highest fractal high since the key low
+var int   spanHb = na
+var string dir   = ""          // "" until the first break; then bull / bear
+var bool  pendUp = false       // a break happened, waiting for its fractal
+var bool  pendDn = false
+var int   conf   = 0           // continuations since the flow started
+
+// The fractal sits on the PREVIOUS bar and is confirmed by the bar that just
+// closed — the same one-bar lag the detector uses, so nothing repaints.
+ready = bar_index > 2
+isFH  = ready ? (high[1] > high[2] and high[1] > high[0]) : false
+isFL  = ready ? (low[1]  < low[2]  and low[1]  < low[0])  : false
+fHigh = high[1]
+fLow  = low[1]
+fBar  = bar_index - 1
+
+if ready
+    // Span extremes: what the counter key is seeded from when a break resolves.
+    if isFL and (na(keyHb) or fBar > keyHb)
+        if na(spanLb) or fLow < spanL
+            spanL  := fLow
+            spanLb := fBar
+    if isFH and (na(keyLb) or fBar > keyLb)
+        if na(spanHb) or fHigh > spanH
+            spanH  := fHigh
+            spanHb := fBar
+
+    // A pending break is resolved by the first fractal in its own direction.
+    if pendUp and isFH
+        keyH  := fHigh
+        keyHb := fBar
+        if not na(spanLb)
+            keyL  := spanL
+            keyLb := spanLb
+        spanL  := na
+        spanLb := na
+        pendUp := false
+    else if pendDn and isFL
+        keyL  := fLow
+        keyLb := fBar
+        if not na(spanHb)
+            keyH  := spanH
+            keyHb := spanHb
+        spanH  := na
+        spanHb := na
+        pendDn := false
+
+    // Counter key = the FIRST fractal after the key, then it stays put.
+    if dir == "bull" and isFL and not na(keyHb) and fBar > keyHb and (na(keyLb) or keyLb < keyHb)
+        keyL  := fLow
+        keyLb := fBar
+    if dir == "bear" and isFH and not na(keyLb) and fBar > keyLb and (na(keyHb) or keyHb < keyLb)
+        keyH  := fHigh
+        keyHb := fBar
+
+    // Seed before any structure exists.
+    if na(keyH) and isFH
+        keyH  := fHigh
+        keyHb := fBar
+    if na(keyL) and isFL
+        keyL  := fLow
+        keyLb := fBar
+
+    // Break detection — on the CLOSE of the bar that just finished.
+    if not pendUp and not pendDn
+        if not na(keyH) and close > keyH
+            isCont = dir == "bull"
+            conf  := isCont ? conf + 1 : 0
+            line.new(keyHb, keyH, bar_index, keyH, color = cUp,
+                     style = line.style_solid, width = isCont ? 1 : 2)
+            if showLabels
+                label.new(bar_index, keyH,
+                          (isCont ? "cBOS" : "BOS") + " ↑ " + str.tostring(keyH, format.mintick),
+                          style = label.style_none, textcolor = cUp, size = size.tiny)
+            dir    := "bull"
+            pendUp := true
+        else if not na(keyL) and close < keyL
+            isCont = dir == "bear"
+            conf  := isCont ? conf + 1 : 0
+            line.new(keyLb, keyL, bar_index, keyL, color = cDn,
+                     style = line.style_solid, width = isCont ? 1 : 2)
+            if showLabels
+                label.new(bar_index, keyL,
+                          (isCont ? "cBOS" : "BOS") + " ↓ " + str.tostring(keyL, format.mintick),
+                          style = label.style_none, textcolor = cDn, size = size.tiny)
+            dir    := "bear"
+            pendDn := true
+
+// Live key levels as step lines — the two prices the structure hangs on.
+plot(showKeys ? keyH : na, "Key high", color = cUp, style = plot.style_stepline, linewidth = 1)
+plot(showKeys ? keyL : na, "Key low",  color = cDn, style = plot.style_stepline, linewidth = 1)
+
+// Flow state, bottom-right. "Подтверждений" is the trader's «поток валиден»
+// counter: two continuations make the flow tradeable.
+var table info = table.new(position.bottom_right, 2, 3, border_width = 1)
+if barstate.islast
+    table.cell(info, 0, 0, "Поток",          text_size = size.small)
+    table.cell(info, 1, 0, dir == "bull" ? "восходящий" : dir == "bear" ? "нисходящий" : "—",
+               text_size = size.small, text_color = dir == "bull" ? cUp : cDn)
+    table.cell(info, 0, 1, "Подтверждений",  text_size = size.small)
+    table.cell(info, 1, 1, str.tostring(conf) + (conf >= 2 ? "  ВАЛИДЕН" : ""),
+               text_size = size.small)
+    table.cell(info, 0, 2, "Ключевые",       text_size = size.small)
+    table.cell(info, 1, 2, str.tostring(keyL, format.mintick) + " / " + str.tostring(keyH, format.mintick),
+               text_size = size.small)

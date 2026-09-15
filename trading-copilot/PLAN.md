@@ -103,6 +103,47 @@ and none of them raises. All three are verified with reproductions, not suspecte
 | P5 | More instruments (XAU → FX → indices); each = one `data/*.py` `DataSource`, detectors unchanged | blocked by stable crypto workflow |
 | P5 | QoL: scheduled killzone reports, embeddings KB retrieval, report archive browser | deferred |
 
+## Setup research queue (agreed with the trader 2026-08-26)
+
+Working method, fixed by the trader: **the model describes the setup and lists
+every point it finds ambiguous, missing, or contradictory → the trader supplies
+a live chart example and answers → as many clarification rounds as the code
+needs → backtest.** No arm is coded from a note alone; Bellissimo and Silver
+Bullet were both calibrated against a verified reference trade, and both times
+the first encoding was wrong in a way only the example exposed.
+
+| # | Setup | Source | State |
+|---|---|---|---|
+| 1 | 1h3m Bellissimo | `09_Setups/1h3m_by_Bellissimo.md` | done, run 3 |
+| 2 | ICT Silver Bullet | `08_Entry_Models/ICT_Silver_Bullet.md` | done, no edge |
+| 3 | **30mOF** | `08_Entry_Models/Entry_Models_Practical.md` s1 + `11_Trade_Management/Order_Flow.md` | **built, not yet run** — spec `docs/SETUP_30MOF.md`, launch `scripts/run_30mof.py` |
+| 4 | PO3 / AMD | `05_Sessions_Timings/PO3_AMD.md` | queued |
+| 5 | Market Maker Buy/Sell Model | `06_Bias_Templates/Market_Maker_Model.md` | queued |
+| 6 | CBDR / Asian range | `03_Tools/CBDR.md` | queued |
+| 7 | NWOG / NDOG | `05_Sessions_Timings/NDOG_NWOG.md` | queued |
+| 8 | Unicorn (Breaker x FVG) | not in the KB - needs the trader's own definition | queued |
+| 9 | Turtle Soup | not in the KB - needs the trader's own definition | queued |
+| 10 | IFVG continuation | `03_Tools/IFVG.md` | queued |
+| 11 | SMT divergence | `03_Tools/SMT_Divergence.md` | queued - **two blockers, see below** |
+
+Dropped by the trader 2026-08-26: Local Continuation, 1h3m WinstonFX.
+
+**Working state is in [HANDOFF.md](HANDOFF.md)** — what to run first next session
+and what not to re-litigate.
+
+**SMT needs two decisions before it can be queued for real.** (a) It contradicts
+`docs/RESEARCH_PROTOCOL.md` s7, which excludes SMT from crypto SetupRules
+outright - that line has to be rewritten or the setup dropped again; the
+protocol is not something to quietly ignore. (b) The engine is single-symbol
+end to end: `_run_loop` takes one `df`, and `HTFCondition` varies the timeframe,
+not the instrument. SMT compares BTC against ETH on the same bar, so it needs a
+second symbol plumbed through the engine - the largest engine change on this
+list by a wide margin.
+
+**Items 8 and 9 have no KB note.** Unicorn and Turtle Soup are not in
+`knowledge_base/` in any form, so there is no source to encode against. They
+start from the trader's own description, not from a note.
+
 ## Explicitly deferred
 Order placement / broker APIs. Footprint imbalances & VWAP/TPO (L2/tick data unavailable on public REST).
 Web/GUI frontend (REPL + TUI matches the discretionary workflow).
@@ -127,5 +168,20 @@ plausible numbers rather than an error, which is why they survived so long.
 | R-10 | An inverted stop (wrong side of entry) passed the R:R gate — `compute_rr` takes `abs(entry - sl)` | One trade booked at +11.88R, setting an arm's expectancy to +3.29R over 3 trades | ✅ `_stop_is_on_the_right_side` in both entry paths |
 | R-11 | `_ltf_fvg_near_edge` sorted on `ts`/`timestamp`; the field is `formed_ts`, so it took the OLDEST zone | Limit entries rested on stale imbalances; test-arm trade counts were 3x too low | ✅ takes the first zone (list is newest-first) |
 
-**Still open:** the LTF fetch is uncached, so every arm re-downloads ~95k bars
-(64 requests); parallel arms need `-P 3` to stay under the rate limit.
+| R-12 | **SL/TP resolution at entry sees the future.** The LTF entry fires inside HTF bar H, but `resolve_sl` / `_resolve_first_tp` are handed `df.iloc[:i+1]`, where `i` is the *current* HTF loop index — so `detect_fractals` runs on a frame whose last bar closes **1:00–1:51 after the fill** (measured over 35 resolutions, `bellissimo_1h3m_long`, 600 bars 1h). A 3-candle 1H fractal centred on H needs H+1 to confirm, so targets could be levels not yet visible at entry, and `is_broken` reflects post-entry bars. Same class as P0-2/P0-8 | ✅ FIXED 2026-08-26 — `_htf_slice_asof` cuts the HTF frame at the entry LTF bar's CLOSE, applied at `resolve_sl`, `_resolve_first_tp` and the P2 transition. **Measured against a faithful emulation of the old path (which reproduced прогон 3 exactly): `bellissimo_1h3m_long` +1.430R [+0.48, +2.22] → +0.555R [−1.00, +2.09], 11 trades → 7, PF 6.24 → 1.97 — the only arm in the whole research with a formal edge no longer has one.** Two regression tests in `tests/test_lookahead_regression.py`; `scripts/measure_r12.py` reproduces the comparison |
+
+**Fixed since:** the LTF fetch is now cached (`BatchedOHLCStore`, coverage-based
+rather than request-keyed — see `data/cache.py`). Measured on BTCUSDT 3m/20k
+bars: 7.1 s cold → 0.0 s warm, and a window shifted 6 h forward costs 0.8 s
+because only the tail is fetched. Arms no longer re-download ~95k bars each,
+which also removes the reason to cap parallelism at `-P 3`.
+
+**Still open:** the intrabar-sweep change («известное ограничение движка №1» in
+the Bellissimo spec). R-12 was its prerequisite and is now done: detecting the
+sweep on 3M makes the signal fire inside a forming hourly bar, and
+`sl_logic="sweep_fractal"` would have read that bar's FINAL extreme — exactly
+the information the trader does not have at entry. With the as-of cut in place
+that path is safe to build.
+
+прогон 3 is superseded by прогон 4 (see `docs/SETUP_1H3M_BELLISSIMO.md`). Do not
+quote the +1.430R figure: it was produced by the R-12 path.

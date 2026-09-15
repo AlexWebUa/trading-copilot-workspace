@@ -297,3 +297,185 @@ def test_batched_range_trims_to_end_boundary(monkeypatch):
 
     end_ts = pd.Timestamp(end_ms, unit="ms", tz="UTC")
     assert (df.index <= end_ts).all(), "all bars must be on or before end_time"
+
+
+# ---------------------------------------------------------------------------
+# BatchedOHLCStore — the LTF cache the research runs depend on
+# ---------------------------------------------------------------------------
+
+_TF_MS = 60_000  # all fixtures below use 1m bars
+
+
+def _fake_exchange(oldest_open_ms: int, n_bars: int, tf_ms: int = _TF_MS) -> MagicMock:
+    """A mock client backed by a finite synthetic kline history.
+
+    Honours `endTime` and `limit` the way Binance does — return the newest
+    `limit` bars whose open_time is <= endTime — so backwards pagination,
+    short-page-means-history-start, and the coverage arithmetic are all
+    exercised for real instead of being asserted against a canned batch list.
+    """
+    history = [
+        _kline(oldest_open_ms + i * tf_ms, 100.0 + i)
+        for i in range(n_bars)
+    ]
+
+    def _get(url, params=None):
+        params = params or {}
+        end_time = params.get("endTime")
+        limit = params["limit"]
+        rows = history if end_time is None else [r for r in history if r[0] <= end_time]
+        rows = rows[-limit:]
+        resp = MagicMock()
+        resp.raise_for_status.return_value = None
+        resp.json.return_value = rows
+        return resp
+
+    client = MagicMock()
+    client.__enter__ = MagicMock(return_value=client)
+    client.__exit__ = MagicMock(return_value=False)
+    client.get = MagicMock(side_effect=_get)
+    return client
+
+
+@pytest.fixture
+def no_sleep(monkeypatch):
+    monkeypatch.setattr("copilot.data.binance.time.sleep", lambda _: None)
+
+
+@pytest.fixture
+def batched_store(tmp_path):
+    from copilot.data.cache import BatchedOHLCStore
+    return BatchedOHLCStore(cache_dir=tmp_path / "batched")
+
+
+def _fetch(client, store, total_bars, end_ms, batch_size=10):
+    with patch("copilot.data.binance.httpx.Client", return_value=client):
+        return fetch_ohlcv_batched(
+            "BTCUSDT", "1m", total_bars=total_bars, batch_size=batch_size,
+            end_ms=end_ms, store=store,
+        )
+
+
+def test_batched_second_identical_request_makes_no_http_calls(no_sleep, batched_store):
+    """The whole point: arm 2 of a research run must not re-download arm 1's LTF frame."""
+    base = 1_700_000_000_000
+    client = _fake_exchange(base, 50)
+    end_ms = base + 49 * _TF_MS
+
+    first = _fetch(client, batched_store, total_bars=30, end_ms=end_ms)
+    calls_after_first = client.get.call_count
+    assert calls_after_first >= 3, "fixture must force real pagination"
+
+    second = _fetch(client, batched_store, total_bars=30, end_ms=end_ms)
+
+    assert client.get.call_count == calls_after_first, "cached window still hit the network"
+    pd.testing.assert_frame_equal(first, second)
+    assert len(second) == 30
+    assert second.index[-1] == pd.Timestamp(end_ms, unit="ms", tz="UTC")
+
+
+def test_batched_extending_forward_fetches_only_the_tail(no_sleep, batched_store):
+    """A later run whose window ends an hour further on pays for the hour, not the frame."""
+    base = 1_700_000_000_000
+    client = _fake_exchange(base, 80)
+
+    _fetch(client, batched_store, total_bars=40, end_ms=base + 39 * _TF_MS)
+    calls_after_first = client.get.call_count
+
+    later = _fetch(client, batched_store, total_bars=40, end_ms=base + 49 * _TF_MS)
+    tail_calls = client.get.call_count - calls_after_first
+
+    # 10 new bars at batch_size=10: one page to reach them, one to overlap the
+    # bars already held. Re-fetching all 40 would take four.
+    assert tail_calls <= 2, f"tail refresh took {tail_calls} pages"
+    assert len(later) == 40
+    assert later.index[-1] == pd.Timestamp(base + 49 * _TF_MS, unit="ms", tz="UTC")
+    assert later.index[0] == pd.Timestamp(base + 10 * _TF_MS, unit="ms", tz="UTC")
+
+
+def test_batched_extending_backward_fetches_only_the_head(no_sleep, batched_store):
+    """Asking for more history keeps what is already held and reaches further back."""
+    base = 1_700_000_000_000
+    client = _fake_exchange(base, 80)
+    end_ms = base + 79 * _TF_MS
+
+    _fetch(client, batched_store, total_bars=20, end_ms=end_ms)
+    calls_after_first = client.get.call_count
+
+    deeper = _fetch(client, batched_store, total_bars=50, end_ms=end_ms)
+    head_calls = client.get.call_count - calls_after_first
+
+    assert head_calls <= 4, f"head extension took {head_calls} pages"
+    assert len(deeper) == 50
+    assert deeper.index[0] == pd.Timestamp(base + 30 * _TF_MS, unit="ms", tz="UTC")
+    assert deeper.index[-1] == pd.Timestamp(end_ms, unit="ms", tz="UTC")
+    assert deeper.index.is_monotonic_increasing
+    assert not deeper.index.duplicated().any()
+
+
+def test_batched_disjoint_window_replaces_instead_of_bridging(no_sleep, batched_store):
+    """A window nowhere near the stored one must not drag the gap down the wire."""
+    base = 1_700_000_000_000
+    client = _fake_exchange(base, 2_000)
+
+    # Recent window.
+    _fetch(client, batched_store, total_bars=20, end_ms=base + 1_999 * _TF_MS)
+    calls_after_first = client.get.call_count
+
+    # A window 1 900 bars older, sharing no bar with the first.
+    far = _fetch(client, batched_store, total_bars=20, end_ms=base + 49 * _TF_MS)
+    second_calls = client.get.call_count - calls_after_first
+
+    assert second_calls <= 3, (
+        f"disjoint window cost {second_calls} pages — the gap was bridged"
+    )
+    assert len(far) == 20
+    assert far.index[-1] == pd.Timestamp(base + 49 * _TF_MS, unit="ms", tz="UTC")
+
+
+def test_batched_history_start_is_remembered(no_sleep, batched_store):
+    """Once the series' first bar is in hand, asking for more must not re-probe for it."""
+    base = 1_700_000_000_000
+    client = _fake_exchange(base, 25)
+    end_ms = base + 24 * _TF_MS
+
+    first = _fetch(client, batched_store, total_bars=100, end_ms=end_ms)
+    assert len(first) == 25, "fixture only has 25 bars"
+    calls_after_first = client.get.call_count
+
+    again = _fetch(client, batched_store, total_bars=100, end_ms=end_ms)
+
+    assert client.get.call_count == calls_after_first, (
+        "start-of-history was not remembered — the head was probed again"
+    )
+    pd.testing.assert_frame_equal(first, again)
+
+
+def test_batched_use_cache_false_leaves_no_store(no_sleep, tmp_path, monkeypatch):
+    """The opt-out must not write, and must still return the same window."""
+    monkeypatch.setenv("TRADING_COPILOT_CACHE_DIR", str(tmp_path / "cache"))
+    base = 1_700_000_000_000
+    client = _fake_exchange(base, 50)
+    end_ms = base + 49 * _TF_MS
+
+    with patch("copilot.data.binance.httpx.Client", return_value=client):
+        df = fetch_ohlcv_batched(
+            "BTCUSDT", "1m", total_bars=30, batch_size=10,
+            end_ms=end_ms, use_cache=False,
+        )
+
+    assert len(df) == 30
+    assert not list((tmp_path / "cache").glob("batched_*")) if (tmp_path / "cache").exists() else True
+
+
+def test_batched_returned_window_never_exceeds_end_ms(no_sleep, batched_store):
+    """The store holds more than the caller asked for; the caller must not see it."""
+    base = 1_700_000_000_000
+    client = _fake_exchange(base, 100)
+
+    _fetch(client, batched_store, total_bars=90, end_ms=base + 99 * _TF_MS)
+    narrow = _fetch(client, batched_store, total_bars=10, end_ms=base + 49 * _TF_MS)
+
+    assert len(narrow) == 10
+    assert narrow.index[-1] == pd.Timestamp(base + 49 * _TF_MS, unit="ms", tz="UTC")
+    assert narrow.index[0] == pd.Timestamp(base + 40 * _TF_MS, unit="ms", tz="UTC")

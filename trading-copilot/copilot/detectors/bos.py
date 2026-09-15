@@ -1,10 +1,17 @@
 """
-Break of Structure (BOS) / Confirmed BOS (cBOS) detector — thin wrapper
+Break of Structure (BOS) / Continuation BOS (cBOS) detector — thin wrapper
 over `smartmoneyconcepts` smc.bos_choch (P0-3, June 2026).
 
-Terminology:
-- BOS  : break in the trend direction (continuation).
-- cBOS : structural shift / Change of Character (CHoCH in smc terms).
+Terminology — the trader's, per `99_Glossary/Glossary.md`, NOT the library's:
+- cBOS : CONTINUATION. Price closes a body beyond the key point in the
+         direction of the current structure, which keeps the structure alive.
+- BOS  : the STRUCTURE BREAK (слом). A body close beyond the key point on the
+         other side; it ends the current structure and starts a new one.
+
+The library names these the other way round (its BOS is the continuation, its
+CHOCH the reversal). They are swapped once, in `smc_lib.structure_events`.
+Renamed 2026-08-26 after the 30mOF spec review found the code contradicting
+the trader's own glossary.
 
 The library scans 4-swing windows over its own swing detection and emits
 an event only when a candle CLOSE actually breaks the level (close_break).
@@ -24,10 +31,10 @@ from copilot.detectors.smc_lib import lib_swings, structure_events, true_range_a
 TOOL_SCHEMA = {
     "name": "detect_bos",
     "description": (
-        "Detect Break of Structure (BOS) and Confirmed BOS (cBOS) events on a given "
+        "Detect structure-break (BOS) and continuation (cBOS) events on a given "
         "timeframe. Returns the most recent events newest-first with direction, broken "
         "level, and break-candle body size relative to ATR. "
-        "BOS confirms trend continuation; cBOS signals a structural shift/reversal."
+        "cBOS confirms the structure continues; BOS is the break that ends it."
     ),
     "input_schema": {
         "type": "object",

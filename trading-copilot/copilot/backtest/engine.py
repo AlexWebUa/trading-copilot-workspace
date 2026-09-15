@@ -43,6 +43,7 @@ from copilot.backtest.simulate import (
     resolve_sl,
     resolve_tp,
 )
+from copilot.data.base import TF_MINUTES
 from copilot.journal.record import TradeRecord, compute_rr, session_from_ts
 
 # Minimum bars before the engine starts evaluating signals
@@ -111,10 +112,8 @@ _KYIV_TZ = _tz("Europe/Kyiv")
 _NY_TZ = _tz("America/New_York")
 
 # Timeframe → minutes lookup
-_TF_MINUTES = {
-    "1m": 1, "3m": 3, "5m": 5, "15m": 15,
-    "30m": 30, "1h": 60, "4h": 240, "1d": 1440, "1w": 10080,
-}
+# Single definition, shared with the data layer (see copilot/data/base.py).
+_TF_MINUTES = TF_MINUTES
 
 # Engine states
 _IDLE = "IDLE"
@@ -530,9 +529,16 @@ class BacktestEngine:
                         if result is not None:
                             if result == "win" and use_partial_tp:
                                 # Change 3: TP1 hit → record partial, → P2
+                                # R-12 again: TP1 was hit on THIS LTF bar, so
+                                # the second leg's stop and target must be
+                                # resolved on what was known then.
+                                p2_asof_ts = _ltf_df.index[active_ltf_cursor] + pd.Timedelta(
+                                    minutes=_TF_MINUTES.get(rule.entry_tf, 5)
+                                )
                                 current_sl_price, current_tp2_price = _transition_to_p2(
                                     active_trade, rule, exit_price, exit_ts,
-                                    df.iloc[:i + 1], signal_cache, active_original_sl,
+                                    _htf_slice_asof(df, _TF_MINUTES.get(tf, 60), p2_asof_ts),
+                                    signal_cache, active_original_sl,
                                 )
                                 active_trade.sl_price = current_sl_price  # type: ignore
                                 active_ltf_cursor_p2 = active_ltf_cursor  # noqa: F841
@@ -694,9 +700,20 @@ class BacktestEngine:
 
                     entry_price = candidate_entry
 
+                    # R-12: the HTF frame must stop at the moment this LTF bar
+                    # closed — not at the loop's current HTF bar, which is up
+                    # to two hours further on.
+                    entry_asof_ts = _ltf_df.index[ltf_scan_cursor] + pd.Timedelta(
+                        minutes=_TF_MINUTES.get(rule.entry_tf, 5)
+                    )
+                    htf_asof = _htf_slice_asof(
+                        df, _TF_MINUTES.get(tf, 60), entry_asof_ts
+                    )
+
                     sl_price = resolve_sl(
                         rule.sl_logic, entry_price, rule.direction,
-                        df.iloc[: i + 1], signal_cache,
+                        htf_asof, signal_cache,
+                        min_stop_atr=rule.min_stop_atr,
                     )
                     if not _stop_is_on_the_right_side(entry_price, sl_price, rule.direction):
                         # Price is already past the stop — there is no trade to
@@ -707,7 +724,7 @@ class BacktestEngine:
 
                     tp1_price = _resolve_first_tp(
                         rule, entry_price, sl_price,
-                        df.iloc[: i + 1], signal_cache, active_registry,
+                        htf_asof, signal_cache, active_registry,
                     )
                     rr = (
                         compute_rr(entry_price, sl_price, tp1_price, rule.direction)
@@ -750,6 +767,8 @@ class BacktestEngine:
                     df=df,
                     detector_cache=signal_cache,
                     direction=rule.direction,
+                    max_wait_bars=rule.max_entry_wait_bars,
+                    registry=active_registry,
                 )
                 if ep is _WAITING:
                     continue
@@ -765,6 +784,7 @@ class BacktestEngine:
                     direction=rule.direction,
                     slice_df=df.iloc[: signal_i + 1],
                     detector_cache=signal_cache,
+                    min_stop_atr=rule.min_stop_atr,
                 )
                 if not _stop_is_on_the_right_side(entry_price, sl_price, rule.direction):
                     skipped_rr += 1
@@ -1205,6 +1225,32 @@ def _ltf_fvg_near_edge(
         # for a long, the bottom of a bearish one for a short.
         return float(upper) if direction == "long" else float(lower)
     return None
+
+def _htf_slice_asof(df: pd.DataFrame, htf_minutes: int, asof_ts) -> pd.DataFrame:
+    """HTF bars whose CLOSE is at or before `asof_ts`.
+
+    R-12. An LTF entry fires inside a still-forming HTF bar, but the engine
+    reaches the entry code on a LATER loop iteration — the LTF bars of hour H
+    are scanned when the cursor passes `df.index[H+1]`. Handing the resolvers
+    `df.iloc[:i+1]` therefore gave them a frame ending 1:00–1:51 after the fill
+    (measured over 35 resolutions on `bellissimo_1h3m_long`).
+
+    That is not a cosmetic overshoot. Targets are the two nearest 3-candle
+    fractals on the HTF, and a fractal centred on H is confirmed only once H+1
+    closes — after the entry. `is_broken` likewise reflected post-entry bars.
+    The bias runs one way: the newest fractal is the one most likely to be
+    nearest, so the future frame systematically offered closer targets than
+    were visible, letting setups clear the min_rr gate on levels the trader
+    could not have seen.
+
+    Truncating by CLOSE rather than by open time is the whole point — a bar
+    that has opened is not information until it closes.
+    """
+    if df.empty:
+        return df
+    closes = df.index + pd.Timedelta(minutes=htf_minutes)
+    return df[closes <= asof_ts]
+
 
 def _find_ltf_idx(ltf_df: pd.DataFrame, cutoff_ts) -> int:
     """Return index of first LTF bar opening at or after cutoff_ts.

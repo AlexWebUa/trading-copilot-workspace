@@ -73,6 +73,7 @@ def resolve_entry(
     detector_cache: dict,
     max_wait_bars: int = 10,
     direction: str | None = None,
+    registry: dict | None = None,
 ) -> float | None:
     """
     Compute the actual entry price (or None/Ellipsis) based on entry_after mode.
@@ -110,6 +111,20 @@ def resolve_entry(
             direction=direction,
         )
 
+    # 30mOF POI entries: <source>_near (touch) / <source>_full (complete fill),
+    # where source is poi | fvg | bpr | ob | stb_bts.
+    if entry_after.endswith("_near") or entry_after.endswith("_full"):
+        return _scan_for_level(
+            entry_after,
+            signal_bar_idx=signal_bar_idx,
+            current_bar_idx=current_bar_idx,
+            df=df,
+            detector_cache=detector_cache,
+            max_wait_bars=max_wait_bars,
+            direction=direction,
+            registry=registry,
+        )
+
     if entry_after == "ob_midpoint":
         return _scan_for_level(
             "ob_midpoint",
@@ -138,6 +153,7 @@ def _scan_for_level(
     detector_cache: dict,
     max_wait_bars: int,
     direction: str | None = None,
+    registry: dict | None = None,
 ) -> float | None:
     """
     Scan bars after the signal bar, looking for a wick that touches the target level.
@@ -146,8 +162,16 @@ def _scan_for_level(
     Returns float if the current bar touches the level, _WAITING if not yet reached,
     or None if the window expired or the level cannot be resolved.
     """
-    # Resolve the target price from cached detector results
-    level = _resolve_limit_level(mode, detector_cache, direction)
+    # Resolve the target price from cached detector results. The signal bar's
+    # close is the reference for "nearest": using the current bar's would let a
+    # zone drift in and out of contention as price moves inside the wait window.
+    ref_price = float(df.iloc[signal_bar_idx]["close"])
+    # Zones are resolved as of the SIGNAL bar — a POI that only forms while the
+    # limit is resting was not part of the setup the rule fired on.
+    level = _resolve_limit_level(
+        mode, detector_cache, direction, ref_price,
+        registry, df.iloc[: signal_bar_idx + 1],
+    )
     if level is None:
         return None  # can't determine level → cancel
 
@@ -172,10 +196,90 @@ def _scan_for_level(
     return _WAITING
 
 
+# POI zones the 30mOF setup enters from. Each entry is (cache key, list key).
+_POI_SOURCES: dict[str, tuple[str, str]] = {
+    "fvg":     ("detect_fvg", "fvgs"),
+    "bpr":     ("detect_bpr", "bprs"),
+    "ob":      ("detect_order_block", "obs"),
+    "stb_bts": ("detect_stb_bts", ""),      # two lists, picked by polarity
+}
+
+
+def _zone_bounds(z: dict) -> tuple[float, float] | None:
+    hi = z.get("upper", z.get("high"))
+    lo = z.get("lower", z.get("low"))
+    if hi is None or lo is None:
+        return None
+    return float(hi), float(lo)
+
+
+_POI_RUNNERS: dict[str, dict] = {
+    "detect_fvg": {},
+    "detect_bpr": {},
+    "detect_order_block": {},
+    "detect_stb_bts": {"swing_lookback": 1},
+}
+
+
+def _poi_zones(
+    detector_cache: dict,
+    source: str,
+    direction: str | None,
+    ref_price: float | None,
+    registry: dict | None = None,
+    slice_df=None,
+) -> list[tuple[float, float]]:
+    """Zones of the right polarity that price can still retrace INTO.
+
+    A long enters from a zone below it and a short from one above; a bullish gap
+    that price has already left behind overhead is not an entry, it is a target.
+    Filtering on ref_price is what keeps "nearest POI" from picking one.
+    """
+    want = {"long": "bullish", "short": "bearish"}.get(direction or "")
+    cache_key, list_key = _POI_SOURCES[source]
+    result = detector_cache.get(cache_key)
+    if result is None and registry is not None and slice_df is not None:
+        # Only detectors named in the rule's conditions land in the signal cache,
+        # and a 30mOF arm's conditions are all on the flow — so the POI detector
+        # has to be run here. Same pattern as _tp_nearest_fractal; without it the
+        # arm silently skips every entry and reports "no setups", not an error.
+        fn = registry.get(cache_key)
+        if fn is not None:
+            try:
+                result = fn(slice_df, **_POI_RUNNERS.get(cache_key, {}))
+                detector_cache[cache_key] = result
+            except Exception:
+                result = None
+    result = result or {}
+    if source == "stb_bts":
+        raw = result.get("stb" if want == "bullish" else "bts", [])
+    else:
+        raw = [z for z in result.get(list_key, []) if want is None or z.get("type") == want]
+
+    out: list[tuple[float, float]] = []
+    for z in raw:
+        if z.get("is_mitigated"):
+            continue
+        bounds = _zone_bounds(z)
+        if bounds is None:
+            continue
+        hi, lo = bounds
+        if ref_price is not None:
+            if direction == "long" and lo > ref_price:
+                continue
+            if direction == "short" and hi < ref_price:
+                continue
+        out.append((hi, lo))
+    return out
+
+
 def _resolve_limit_level(
     mode: str,
     detector_cache: dict,
     direction: str | None = None,
+    ref_price: float | None = None,
+    registry: dict | None = None,
+    slice_df=None,
 ) -> float | None:
     """Extract the limit entry price from cached detector results.
 
@@ -218,6 +322,33 @@ def _resolve_limit_level(
             return None
         return (float(high) + float(low)) / 2.0
 
+    # ── 30mOF entry modes ─────────────────────────────────────────────────
+    # "Touch" fills at the NEAR edge — the side price reaches first, which is
+    # the conservative reading. "Full fill" waits for the far edge, i.e. the
+    # imbalance being closed completely.
+    if mode.endswith("_near") or mode.endswith("_full"):
+        source, kind = mode.rsplit("_", 1)
+        if source == "poi":
+            zones = [
+                z
+                for src in ("fvg", "bpr", "ob", "stb_bts")
+                for z in _poi_zones(detector_cache, src, direction, ref_price,
+                                    registry, slice_df)
+            ]
+        elif source in _POI_SOURCES:
+            zones = _poi_zones(detector_cache, source, direction, ref_price,
+                               registry, slice_df)
+        else:
+            return None
+        if not zones:
+            return None
+        # Nearest to price: a long retraces DOWN, so the highest top wins.
+        if direction == "short":
+            hi, lo = min(zones, key=lambda z: z[1])
+            return lo if kind == "near" else hi
+        hi, lo = max(zones, key=lambda z: z[0])
+        return hi if kind == "near" else lo
+
     return None
 
 
@@ -226,6 +357,43 @@ def _resolve_limit_level(
 # ---------------------------------------------------------------------------
 
 def resolve_sl(
+    sl_logic: str,
+    entry_price: float,
+    direction: str,
+    slice_df: pd.DataFrame,
+    detector_cache: dict,
+    min_stop_atr: float = 0.0,
+) -> float:
+    """Structural stop, widened to `min_stop_atr` x ATR if it came out tighter.
+
+    The floor exists because a structural stop is pinned to a level, not to the
+    entry: with `sl_logic="of_key"` the stop sits at the flow's counter key, and
+    a POI that price retraces into can sit right on top of that key. The
+    2026-08-27 30mOF sweep measured what that produces — a median stop of $33
+    on `ob_full_long`, a minimum of $0.90 across the sample — and those trades
+    are not merely noisy, they PASS the `min_rr` filter more easily than real
+    ones, because at $30 of risk almost any target clears 1.8R. They then
+    dominate the arm.
+
+    The trader's answer (2026-08-27) was to widen the stop to a minimum rather
+    than skip the trade, with RR recomputed from the widened stop — which
+    happens naturally, since `min_rr` is checked after this returns.
+
+    Default 0.0 leaves every other setup exactly as it was.
+    """
+    sl = _resolve_sl_structural(
+        sl_logic, entry_price, direction, slice_df, detector_cache
+    )
+    if min_stop_atr > 0:
+        atr = _compute_atr(slice_df)
+        floor = atr * min_stop_atr
+        if floor > 0 and abs(entry_price - sl) < floor:
+            sign = -1 if direction == "long" else 1
+            return entry_price + sign * floor
+    return sl
+
+
+def _resolve_sl_structural(
     sl_logic: str,
     entry_price: float,
     direction: str,
@@ -260,6 +428,9 @@ def resolve_sl(
         except (IndexError, ValueError):
             pct = 1.0
         return entry_price * (1.0 + sign * pct / 100.0)
+
+    if sl_logic == "of_key":
+        return _sl_from_of_key(entry_price, direction, detector_cache, atr)
 
     if sl_logic == "sweep_fractal":
         return _sl_from_sweep_fractal(entry_price, direction, slice_df, detector_cache, atr)
@@ -604,6 +775,34 @@ def _tp_from_fta(
     if not edges:
         return None
     return min(edges) if direction == "long" else max(edges)
+
+
+def _sl_from_of_key(
+    entry_price: float,
+    direction: str,
+    detector_cache: dict,
+    atr: float,
+) -> float:
+    """Behind the live counter key of the order flow — the "fresh strong point".
+
+    The trader's own placement (2026-08-26): entering after the body close at
+    20:00 on 25 Jul, the stop sits behind the 19:00 low. That is the key low the
+    structure is hanging on, which is also its invalidation level — so the stop
+    and the structural stop-out are the same event, by design.
+
+    Behind the WICK, plus a tenth of an ATR, matching `sweep_fractal`.
+    """
+    sign = -1 if direction == "long" else 1
+    buffer = atr * 0.1
+
+    flow = detector_cache.get("detect_order_flow") or {}
+    key = flow.get("key_low") if direction == "long" else flow.get("key_high")
+    if key and key.get("price") is not None:
+        return float(key["price"]) + sign * buffer
+
+    # No flow means no structure to hang a stop on; an ATR stop keeps the run
+    # going rather than inventing a level.
+    return entry_price + sign * atr * 1.5
 
 
 def _sl_from_sweep_fractal(

@@ -1,9 +1,106 @@
 # Trading Co-Pilot — Current State
 
-_Last updated: 2026-07-29._ What exists and how trustworthy it is. Roadmap: [PLAN.md](PLAN.md). Design:
+_Last updated: 2026-09-15._ What exists and how trustworthy it is. Roadmap: [PLAN.md](PLAN.md). Design:
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Why the trust caveats: [docs/AUDIT_HISTORY.md](docs/AUDIT_HISTORY.md).
 
 ## Headline
+
+> **Start here next session: [HANDOFF.md](HANDOFF.md).**
+
+**No setup has a demonstrated edge.** 30mOF ran on 2026-08-27 — 22 arms, a year
+of 30m, honest costs — and not one arm's confidence interval cleared zero.
+`bellissimo_1h3m_long` fell to +0.555R [-1.00, +2.09] when R-12 was fixed the
+day before, and to **+0.201R [-1.31, +1.73]** once costs were charged
+(`docs/SETUP_1H3M_BELLISSIMO.md` → прогон 5). Silver Bullet found none over 280
+trades, and its one borderline arm, `sb_nyam_mkt_long`, fell from +0.633R
+[+0.02, +1.26] to **+0.302R [-0.29, +0.92]** once costs were charged
+(`docs/SETUP_ICT_SILVER_BULLET.md` → прогон 2). Do not quote any
+pre-2026-08-27 backtest figure.
+
+### Landed 2026-09-15
+
+- **ORB, the trader's variant** — stop behind the last 3-candle fractal
+  confirmed before the New York open (`sl_method="Fractal"`, floored by
+  `min_stop_atr`), `tp_method="FixedR"`, and an order-flow bias on 1h/4h
+  (`simulate(..., bias=...)`; `bias_series` releases a structure break only
+  once its HTF candle has closed). All 12 cells negative on the first two
+  years; the selected one repeated the loss on the held-out year.
+  `docs/SETUP_ORB_ALGO.md`.
+- **`sb_nyam_mkt_long` re-scored with costs** — the published result
+  reproduces without costs (+0.633R vs +0.627R); costs take it to
+  +0.302R [-0.29, +0.92]. The project's only formally positive arm is gone.
+- `scripts/run_costs_recheck.py` takes `--start/--end`, so a re-score runs on
+  the published window rather than "the last N bars".
+
+### Two defects the 30mOF run exposed in the engine, not in the setups
+
+- **Costs were never charged.** `SetupRule.fee_bps` and `slippage_bps` default
+  to 0.0 and no rule file sets them — only `scripts/rebaseline.py` did. Every
+  setup research run before 2026-08-27, Bellissimo and Silver Bullet included, scored
+  free trades. Re-scoring confirmed it: costs are worth 0.354R per trade long
+  and 0.590R short on Bellissimo, and 0.33R on `sb_nyam_mkt_long`.
+- **A structural stop can land on the entry.** `sl_logic` pins the stop to a
+  level, so an entry filling at a POI that sits on that level leaves near-zero
+  risk — measured down to **$0.90** on BTC. Such trades clear `min_rr` more
+  easily than real ones and then dominate the arm. Fixed by
+  `SetupRule.min_stop_atr` (0.0 everywhere except 30mOF, which uses 0.5 per the
+  trader's decision). Both are pinned in `tests/test_backtest_costs.py`.
+
+Three setups are formalised — 1h3m Bellissimo, ICT Silver Bullet, 30mOF — each
+against a chart example the trader verified bar by bar, and each with a golden
+test. The engine, the data layer and the detectors they use are trustworthy; see
+the caveats below for what is not.
+
+### Landed 2026-09-14
+
+- **30mOF run 2 complete** — 22 arms, three years of 30m, stop floor, costs.
+  No edge; five arms confirmed negative (upper bound below zero). Touch beats
+  full fill in all five readable POI pairs. `docs/SETUP_30MOF.md`.
+- **ORB Algo (public TradingView script) ported** — `copilot/backtest/orb_algo.py`,
+  calibrated to the trader's own dashboard exactly (35 / 12 / 20 / 37.5% /
+  0.02% / 0.66%). Three years, two anchors: no edge once the take-profit fills
+  at the close that triggered it and costs are charged. The published result
+  rests mostly on booking that fill at the EMA. `docs/SETUP_ORB_ALGO.md`.
+- **`fetch_ohlcv_batched` caps a request at 100 000 bars** — multi-year LTF
+  windows have to be loaded in chunks (`scripts/run_orb.py`, `load_history`).
+- **The canonical index is `datetime64[ms]`** — `DatetimeIndex.asi8` returns
+  milliseconds, not nanoseconds. Guarded in `orb_algo` and `tests/test_orb_algo.py`.
+
+### Landed 2026-08-27
+
+- **30mOF run 1** — 22 arms, `docs/SETUP_30MOF.md` → «Прогон 1». No edge; the
+  POI arms measured degenerate fills and are being re-run after the stop floor.
+- **`min_stop_atr`** — floor on the structural stop, `simulate.resolve_sl`.
+- **Cost model wired into the runner** — 4 bps fee + 2 bps slippage per side.
+- **The sweep is linear now.** `detect_order_flow` at `lookback=8000` reproduces
+  the unbounded walk exactly (500 slices, every field 100%,
+  `research/runs/of_lookback.json`) and was confirmed end to end: the market
+  arms re-ran field-for-field identical at 1.83x the speed. Three years of 30m
+  went from ~2.7 h per arm to ~31 min.
+- **Sharded runs** — `scripts/shard_*.sh`, `merge_shards.py`, `analyse_30mof.py`,
+  `inspect_stops.py`, `measure_of_lookback.py`. 14 arms in 39 min instead of 2.8 h.
+- **Windows are pinned** (`--start/--end`). Without it each arm scores a slightly
+  different window, and parallel shards score seven different ones.
+
+### Landed 2026-08-26
+
+- **R-12** — `_htf_slice_asof` cuts the HTF frame at the entry bar's close.
+  Two regression tests; measured impact recorded in `PLAN.md` and
+  `docs/SETUP_1H3M_BELLISSIMO.md` (прогон 4).
+- **LTF fetch cache** — `BatchedOHLCStore`, coverage-based. 20k 3m bars: 7.1 s
+  cold, 0.0 s warm. The `-P 3` parallelism cap is obsolete.
+- **BOS / cBOS renamed** to the trader's convention (cBOS = continuation,
+  BOS = the break). Swapped once in `smc_lib.structure_events`, guarded by
+  `test_continuation_is_named_cbos_not_bos`.
+- **30mOF built** — `detect_order_flow` (single-pass structural walk + pool
+  gate), `detect_bpr`, `detect_stb_bts`, `sl_logic="of_key"`, POI entry modes,
+  28 rules across two stages, `scripts/run_30mof.py`.
+- **Native Pine** — `copilot/pine/native/order_flow.pine` computes on the
+  chart's own bars, so a generated file can no longer drift off its candles.
+  `debug_detectors.py` now defaults to **futures**, not spot.
+
+## Background (state as of 2026-07-29, kept for context)
+
 
 All of Phases 1–6 + 8a are **built**. After the June 2026 audit, P0-1…P0-7 (source-data & evidence
 integrity), P1-1/P1-2/P1-3 (test integrity + analysis workflow) and P2-1/P2-2 (detector repairs) are
@@ -17,13 +114,11 @@ integrity), P1-1/P1-2/P1-3 (test integrity + analysis workflow) and P2-1/P2-2 (d
   conflict hierarchy (MS > sweep > OB/FVG > orderflow), and the trader's position-management policy; the
   noise-signal "upgrade POI quality" path and the calls to unregistered `check_*` composites were removed.
   The `agent.py` multi-TF keying + anti-hallucination guard is fixed (P1-3).
-- **⚠️ NOT trustworthy — the backtest engine and every number it produced.** The 2026-07-29 review found
-  three verified evidence-integrity bugs (P0b / P0-8…P0-10 in [PLAN.md](PLAN.md)): the engine never scans
-  the entry bar for SL/TP, trades left open at end-of-data are silently dropped from the stats, and the
-  registry result cache ignores detector kwargs so re-probing with different params returns the previous
-  answer. P0-8 biases results **optimistically**, so `REBASELINE_2026-06-10.md` is superseded pending a
-  re-run (P0-11).
-- **Still pending:** P0b (current frontier), then P1-4 (HIGH/MED/LOW probability assessment).
+- **P0b is now DONE** (P0-8/P0-9/P0-10 landed Aug 2026), and so is R-12, the fourth bug of the same
+  class found on 2026-08-26. `REBASELINE_2026-06-10.md` remains superseded — P0-11 was never re-run and
+  is low value, since the research protocol excludes the 12 synthetic rules it measures.
+- **Still pending:** P1-4 (HIGH/MED/LOW probability assessment), the intrabar-sweep change for
+  Bellissimo, and P2-4 (journal pattern analysis).
 - **No demonstrated edge yet.** The one re-baseline run found none — but it was narrow (1 symbol/TF, 2000
   bars, 2–3 trades per split on several rules) *and* produced by the buggy exit path. Finding edge is the
   setup-R&D loop, still ahead, and it is blocked on P0b + P2-3 + P2-5.
@@ -43,6 +138,8 @@ Verdicts from [DETECTOR_REVIEW_2026-06-10.md](DETECTOR_REVIEW_2026-06-10.md); ex
 | `detect_cumulative_delta` | ✅ rewritten (P0-5) | swing-to-swing divergence; pool-anchored sweep |
 | `detect_fractals`, `check_multi_tf_alignment`, `current_killzone`, `detect_fib_zones` | ✅ fixed (P2-1) | Williams 5-bar fractals + swept/broken; weekend gate; single MTF path; auto-direction OTE |
 | `detect_mitigation_block`, `detect_sponsored_candle`, `detect_breaker_block` | ✅ fixed (P2-2) | all on the shared swing-break OB (`scan_order_blocks`, R3); sponsored/mitigation use nearest-prior-pool sweeps (R4); breaker pierce = close-through |
+| `detect_order_flow` | ✅ new (2026-08-26) | single-pass structural walk; golden test on the trader's own 25-27 Jul markup |
+| `detect_bpr`, `detect_stb_bts` | ✅ new (2026-08-26) | POI zones 30mOF enters from; BPR is rare by construction (~2% of slices) |
 | `detect_rejection_block` | ⛔ quarantined | definition under manual revision by the trader (P2-1) |
 | `detect_compression`, `check_cd_absorption`, `check_absorption_at_poi`, `check_cd_divergence_at_structure` | ⛔ quarantined | hidden from the LLM until rewritten (P0-4) |
 
@@ -51,8 +148,9 @@ Verdicts from [DETECTOR_REVIEW_2026-06-10.md](DETECTOR_REVIEW_2026-06-10.md); ex
 - **`data/`** — Binance USD-M futures (`fapi.binance.com`, spot fallback), parquet TTL cache, canonical
   OHLCV schema, `DataSource` protocol. Forming candle dropped. Delta from kline `taker_buy_base_vol`.
 - **`detectors/`** — 23 tools + `generate_pine_script`, which charts only the detectors the analysis
-  deemed significant (the LLM passes `detectors=[...]`; parallel `ThreadPoolExecutor`, TradingView v5
+  deemed significant (the LLM passes `detectors=[...]`; parallel `ThreadPoolExecutor`, TradingView v6
   overlay with per-layer toggles and `alertcondition()`s). `smc_lib.py` wraps `smartmoneyconcepts`.
+  Added Aug 2026 for 30mOF: `order_flow.py` (structural walk + pool gate), `bpr.py`, `stb_bts.py`.
 - **`pine/`** — the Pine generator itself, shared with `scripts/debug_detectors.py`: 19 per-detector
   emitters (moved out of the script, byte-identical), the runner table, `build_overlay`, and the
   artifact store. 12 layers are chartable — quarantined detectors, the delta layer and the two

@@ -1,0 +1,393 @@
+{
+  "start": "2023-09-14 00:00:00+00:00",
+  "end": "2026-09-14 00:00:00+00:00",
+  "split": "2025-09-14 00:00:00+00:00",
+  "bars": 315936,
+  "gaps": 0,
+  "anchors": {
+    "utc0": {
+      "ablation": {
+        "\u043a\u0430\u043a \u0432 TradingView": {
+          "n": 1022,
+          "winrate": 0.3953,
+          "mean_pct": 0.0215,
+          "mean_pct_ci": [
+            -0.006,
+            0.051
+          ],
+          "total_pct": 21.97,
+          "mean_r": 0.097,
+          "mean_r_ci": [
+            -0.017,
+            0.215
+          ],
+          "pf_r": 1.161,
+          "median_risk_pct": 0.2541,
+          "dashboard": {
+            "total_days": 1096,
+            "wins": 403,
+            "losses": 619,
+            "winrate_pct": 39.43,
+            "avg_profit_pct": 0.02,
+            "total_profit_pct": 17.24
+          }
+        },
+        "+ \u0442\u0435\u0439\u043a \u043f\u043e close": {
+          "n": 1022,
+          "winrate": 0.3278,
+          "mean_pct": -0.0225,
+          "mean_pct_ci": [
+            -0.048,
+            0.005
+          ],
+          "total_pct": -23.02,
+          "mean_r": -0.038,
+          "mean_r_ci": [
+            -0.14,
+            0.074
+          ],
+          "pf_r": 0.938,
+          "median_risk_pct": 0.2541
+        },
+        "+ \u0441\u0442\u043e\u043f \u0440\u0430\u043d\u044c\u0448\u0435 \u0442\u0435\u0439\u043a\u0430": {
+          "n": 1022,
+          "winrate": 0.3278,
+          "mean_pct": -0.0243,
+          "mean_pct_ci": [
+            -0.05,
+            0.003
+          ],
+          "total_pct": -24.8,
+          "mean_r": -0.042,
+          "mean_r_ci": [
+            -0.144,
+            0.07
+          ],
+          "pf_r": 0.932,
+          "median_risk_pct": 0.2541
+        },
+        "+ \u0431\u0435\u0437 \u0431\u0430\u0440\u0430 \u0432\u0445\u043e\u0434\u0430": {
+          "n": 1022,
+          "winrate": 0.3669,
+          "mean_pct": -0.0199,
+          "mean_pct_ci": [
+            -0.047,
+            0.008
+          ],
+          "total_pct": -20.31,
+          "mean_r": -0.028,
+          "mean_r_ci": [
+            -0.133,
+            0.083
+          ],
+          "pf_r": 0.955,
+          "median_risk_pct": 0.2541
+        },
+        "+ \u0438\u0437\u0434\u0435\u0440\u0436\u043a\u0438 4+2 bps": {
+          "n": 1022,
+          "winrate": 0.3376,
+          "mean_pct": -0.1399,
+          "mean_pct_ci": [
+            -0.167,
+            -0.112
+          ],
+          "total_pct": -142.96,
+          "mean_r": -0.583,
+          "mean_r_ci": [
+            -0.691,
+            -0.47
+          ],
+          "pf_r": 0.423,
+          "median_risk_pct": 0.2541
+        }
+      },
+      "honest": {
+        "in_sample": {
+          "n": 684,
+          "winrate": 0.3348,
+          "mean_pct": -0.1503,
+          "mean_pct_ci": [
+            -0.182,
+            -0.112
+          ],
+          "total_pct": -102.78,
+          "mean_r": -0.565,
+          "mean_r_ci": [
+            -0.696,
+            -0.418
+          ],
+          "pf_r": 0.429,
+          "median_risk_pct": 0.2607
+        },
+        "held_out_last_year": {
+          "n": 338,
+          "winrate": 0.3432,
+          "mean_pct": -0.1189,
+          "mean_pct_ci": [
+            -0.163,
+            -0.073
+          ],
+          "total_pct": -40.18,
+          "mean_r": -0.621,
+          "mean_r_ci": [
+            -0.799,
+            -0.438
+          ],
+          "pf_r": 0.411,
+          "median_risk_pct": 0.2378
+        },
+        "long": {
+          "n": 507,
+          "winrate": 0.357,
+          "mean_pct": -0.1196,
+          "mean_pct_ci": [
+            -0.162,
+            -0.078
+          ],
+          "total_pct": -60.61,
+          "mean_r": -0.53,
+          "mean_r_ci": [
+            -0.697,
+            -0.353
+          ],
+          "pf_r": 0.467,
+          "median_risk_pct": 0.2534
+        },
+        "short": {
+          "n": 515,
+          "winrate": 0.3184,
+          "mean_pct": -0.1599,
+          "mean_pct_ci": [
+            -0.195,
+            -0.122
+          ],
+          "total_pct": -82.35,
+          "mean_r": -0.636,
+          "mean_r_ci": [
+            -0.784,
+            -0.49
+          ],
+          "pf_r": 0.382,
+          "median_risk_pct": 0.2573
+        },
+        "risk_pct_quantiles": {
+          "0.1": 0.1285,
+          "0.25": 0.1759,
+          "0.5": 0.2541,
+          "0.75": 0.3892,
+          "0.9": 0.5719
+        },
+        "share_costs_exceed_1r": 0.0793
+      }
+    },
+    "ny_open": {
+      "ablation": {
+        "\u043a\u0430\u043a \u0432 TradingView": {
+          "n": 968,
+          "winrate": 0.5031,
+          "mean_pct": 0.0998,
+          "mean_pct_ci": [
+            0.053,
+            0.148
+          ],
+          "total_pct": 96.64,
+          "mean_r": 0.191,
+          "mean_r_ci": [
+            0.088,
+            0.301
+          ],
+          "pf_r": 1.39,
+          "median_risk_pct": 0.4443,
+          "dashboard": {
+            "total_days": 1096,
+            "wins": 485,
+            "losses": 483,
+            "winrate_pct": 50.1,
+            "avg_profit_pct": 0.1,
+            "total_profit_pct": 93.48
+          }
+        },
+        "+ \u0442\u0435\u0439\u043a \u043f\u043e close": {
+          "n": 968,
+          "winrate": 0.4132,
+          "mean_pct": 0.0367,
+          "mean_pct_ci": [
+            -0.007,
+            0.082
+          ],
+          "total_pct": 35.56,
+          "mean_r": 0.058,
+          "mean_r_ci": [
+            -0.038,
+            0.166
+          ],
+          "pf_r": 1.118,
+          "median_risk_pct": 0.4443
+        },
+        "+ \u0441\u0442\u043e\u043f \u0440\u0430\u043d\u044c\u0448\u0435 \u0442\u0435\u0439\u043a\u0430": {
+          "n": 968,
+          "winrate": 0.4132,
+          "mean_pct": 0.033,
+          "mean_pct_ci": [
+            -0.011,
+            0.079
+          ],
+          "total_pct": 31.94,
+          "mean_r": 0.051,
+          "mean_r_ci": [
+            -0.044,
+            0.158
+          ],
+          "pf_r": 1.104,
+          "median_risk_pct": 0.4443
+        },
+        "+ \u0431\u0435\u0437 \u0431\u0430\u0440\u0430 \u0432\u0445\u043e\u0434\u0430": {
+          "n": 968,
+          "winrate": 0.4649,
+          "mean_pct": 0.0413,
+          "mean_pct_ci": [
+            -0.002,
+            0.087
+          ],
+          "total_pct": 40.01,
+          "mean_r": 0.064,
+          "mean_r_ci": [
+            -0.032,
+            0.173
+          ],
+          "pf_r": 1.126,
+          "median_risk_pct": 0.4443
+        },
+        "+ \u0438\u0437\u0434\u0435\u0440\u0436\u043a\u0438 4+2 bps": {
+          "n": 968,
+          "winrate": 0.4153,
+          "mean_pct": -0.0787,
+          "mean_pct_ci": [
+            -0.122,
+            -0.033
+          ],
+          "total_pct": -76.16,
+          "mean_r": -0.335,
+          "mean_r_ci": [
+            -0.434,
+            -0.223
+          ],
+          "pf_r": 0.562,
+          "median_risk_pct": 0.4443
+        }
+      },
+      "honest": {
+        "in_sample": {
+          "n": 649,
+          "winrate": 0.4145,
+          "mean_pct": -0.0805,
+          "mean_pct_ci": [
+            -0.135,
+            -0.023
+          ],
+          "total_pct": -52.23,
+          "mean_r": -0.327,
+          "mean_r_ci": [
+            -0.442,
+            -0.203
+          ],
+          "pf_r": 0.565,
+          "median_risk_pct": 0.4448
+        },
+        "held_out_last_year": {
+          "n": 319,
+          "winrate": 0.4169,
+          "mean_pct": -0.075,
+          "mean_pct_ci": [
+            -0.15,
+            0.003
+          ],
+          "total_pct": -23.93,
+          "mean_r": -0.35,
+          "mean_r_ci": [
+            -0.553,
+            -0.141
+          ],
+          "pf_r": 0.557,
+          "median_risk_pct": 0.4321
+        },
+        "long": {
+          "n": 522,
+          "winrate": 0.4215,
+          "mean_pct": -0.0552,
+          "mean_pct_ci": [
+            -0.114,
+            0.006
+          ],
+          "total_pct": -28.83,
+          "mean_r": -0.325,
+          "mean_r_ci": [
+            -0.461,
+            -0.173
+          ],
+          "pf_r": 0.576,
+          "median_risk_pct": 0.4194
+        },
+        "short": {
+          "n": 446,
+          "winrate": 0.4081,
+          "mean_pct": -0.1061,
+          "mean_pct_ci": [
+            -0.17,
+            -0.042
+          ],
+          "total_pct": -47.34,
+          "mean_r": -0.346,
+          "mean_r_ci": [
+            -0.499,
+            -0.182
+          ],
+          "pf_r": 0.546,
+          "median_risk_pct": 0.4781
+        },
+        "risk_pct_quantiles": {
+          "0.1": 0.1478,
+          "0.25": 0.264,
+          "0.5": 0.4443,
+          "0.75": 0.6798,
+          "0.9": 0.9266
+        },
+        "share_costs_exceed_1r": 0.0599,
+        "weekdays": {
+          "n": 677,
+          "winrate": 0.4756,
+          "mean_pct": -0.0506,
+          "mean_pct_ci": [
+            -0.108,
+            0.013
+          ],
+          "total_pct": -34.23,
+          "mean_r": -0.11,
+          "mean_r_ci": [
+            -0.215,
+            0.002
+          ],
+          "pf_r": 0.802,
+          "median_risk_pct": 0.5622
+        },
+        "weekends": {
+          "n": 291,
+          "winrate": 0.2749,
+          "mean_pct": -0.1441,
+          "mean_pct_ci": [
+            -0.19,
+            -0.091
+          ],
+          "total_pct": -41.93,
+          "mean_r": -0.857,
+          "mean_r_ci": [
+            -1.077,
+            -0.599
+          ],
+          "pf_r": 0.313,
+          "median_risk_pct": 0.1938
+        }
+      }
+    }
+  }
+}
