@@ -19,6 +19,15 @@ pre-2026-08-27 backtest figure.
 
 ### Landed 2026-10-06
 
+- **XAUUSD is on disk and readable offline.** Dukascopy spot, M1 bid and ask,
+  2015-01 to 2026-09 (4.16M bars), outside the repository. `copilot/data/dukascopy.py`
+  (`DukascopySource`; 4h/1d anchored to 17:00 New York; `trading_day`),
+  `scripts/fetch_dukascopy.py`, `scripts/measure_xau.py`, 18 tests. The resample
+  matches Dukascopy's own m5/h1 bars exactly. A round trip costs one 1.64 bps
+  spread against BTC's 12 bps; in R that is a third of BTC's cost on every
+  timeframe. **Nothing has been run on gold**: the combo runner is still
+  BTC-only and needs spread-aware fills first. `docs/DATA_XAUUSD.md`.
+
 - **Detector combinations closed: no edge, out of sample included.** With the
   trader's answers (sessions Asia 02-10 / London 10-18 / New York 15-23 Kyiv,
   HTF target = fractal) stages 2b and 8b ran and added nothing. 173 arms
@@ -33,7 +42,7 @@ pre-2026-08-27 backtest figure.
   not compute this control yet.
 - `combo.py` gained three-session pools with a seven-day life and a
   higher-timeframe fractal target (`target="htf_fractal"`, `min_rr`).
-  `tests/test_combo.py`: 113 tests. Suite: **707 passed, 3 xfailed**.
+  `tests/test_combo.py`: 113 tests. Suite: **725 passed, 3 xfailed**.
 
 ### Landed 2026-10-03
 

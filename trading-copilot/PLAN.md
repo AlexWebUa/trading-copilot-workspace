@@ -100,7 +100,7 @@ and none of them raises. All three are verified with reproductions, not suspecte
 | P3 | Dashboard TUI (rich terminal) | blocked by P0–P1 |
 | P3 | Multi-LLM provider abstraction | LOW — deferred |
 | P4 | Screenshot / text trade analysis (multimodal) | blocked by P1-2 |
-| P5 | More instruments (XAU → FX → indices); each = one `data/*.py` `DataSource`, detectors unchanged | blocked by stable crypto workflow |
+| P5 | More instruments (XAU → FX → indices); each = one `data/*.py` `DataSource`, detectors unchanged | **XAU data landed 2026-10-06** (`data/dukascopy.py`, offline, `docs/DATA_XAUUSD.md`); the combo runner, `SetupRule` engine and REPL still read Binance only |
 | P5 | QoL: scheduled killzone reports, embeddings KB retrieval, report archive browser | deferred |
 
 ## Setup research queue (agreed with the trader 2026-08-26)
