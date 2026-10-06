@@ -116,7 +116,7 @@ the first encoding was wrong in a way only the example exposed.
 |---|---|---|---|
 | 1 | 1h3m Bellissimo | `09_Setups/1h3m_by_Bellissimo.md` | done, run 3 |
 | 2 | ICT Silver Bullet | `08_Entry_Models/ICT_Silver_Bullet.md` | done, no edge |
-| 3 | **30mOF** | `08_Entry_Models/Entry_Models_Practical.md` s1 + `11_Trade_Management/Order_Flow.md` | **built, not yet run** — spec `docs/SETUP_30MOF.md`, launch `scripts/run_30mof.py` |
+| 3 | **30mOF** | `08_Entry_Models/Entry_Models_Practical.md` s1 + `11_Trade_Management/Order_Flow.md` | done, no edge (22 arms, 3 years) — `docs/SETUP_30MOF.md` |
 | 4 | PO3 / AMD | `05_Sessions_Timings/PO3_AMD.md` | queued |
 | 5 | Market Maker Buy/Sell Model | `06_Bias_Templates/Market_Maker_Model.md` | queued |
 | 6 | CBDR / Asian range | `03_Tools/CBDR.md` | queued |
@@ -127,6 +127,13 @@ the first encoding was wrong in a way only the example exposed.
 | 11 | SMT divergence | `03_Tools/SMT_Divergence.md` | queued - **two blockers, see below** |
 
 Dropped by the trader 2026-08-26: Local Continuation, 1h3m WinstonFX.
+
+**Out of queue, 2026-10-03 — detector combinations.** 14 simple chains of the
+seven core tools, prompted by a video claiming an edge for "FVG after a
+liquidity sweep". Run in stages of <= 20 arms on defaults, without a reference
+trade: 173 arms in-sample, no edge; the held-out year, opened once for the two
+arms that cleared the bar, did not confirm them. Closed 2026-10-06.
+`docs/SETUP_COMBOS.md`, `scripts/run_combo.py`.
 
 **Working state is in [HANDOFF.md](HANDOFF.md)** — what to run first next session
 and what not to re-litigate.

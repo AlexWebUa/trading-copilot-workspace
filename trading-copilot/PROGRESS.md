@@ -1,6 +1,6 @@
 # Trading Co-Pilot — Current State
 
-_Last updated: 2026-09-15._ What exists and how trustworthy it is. Roadmap: [PLAN.md](PLAN.md). Design:
+_Last updated: 2026-10-06._ What exists and how trustworthy it is. Roadmap: [PLAN.md](PLAN.md). Design:
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Why the trust caveats: [docs/AUDIT_HISTORY.md](docs/AUDIT_HISTORY.md).
 
 ## Headline
@@ -16,6 +16,44 @@ trades, and its one borderline arm, `sb_nyam_mkt_long`, fell from +0.633R
 [+0.02, +1.26] to **+0.302R [-0.29, +0.92]** once costs were charged
 (`docs/SETUP_ICT_SILVER_BULLET.md` → прогон 2). Do not quote any
 pre-2026-08-27 backtest figure.
+
+### Landed 2026-10-06
+
+- **Detector combinations closed: no edge, out of sample included.** With the
+  trader's answers (sessions Asia 02-10 / London 10-18 / New York 15-23 Kyiv,
+  HTF target = fractal) stages 2b and 8b ran and added nothing. 173 arms
+  in-sample; against a same-side random entry 143 are indistinguishable, 4
+  worse, 24 too few, 2 better — one chain, `b3_1h_long` and its 3R variant. The
+  held-out year was opened once for those two: -0.089R [-0.42, +0.26] and
+  -0.375R [-0.76, +0.07]. `docs/SETUP_COMBOS.md`.
+- **Edge is now measured against a same-side random entry, not zero** — the
+  trader's decision, `docs/RESEARCH_PROTOCOL.md` §2.5. `run_combo.py` draws
+  3 000-20 000 random trades per arm with each trade's own risk and
+  reward-to-risk and bootstraps the difference. The `SetupRule` engine does
+  not compute this control yet.
+- `combo.py` gained three-session pools with a seven-day life and a
+  higher-timeframe fractal target (`target="htf_fractal"`, `min_rr`).
+  `tests/test_combo.py`: 113 tests. Suite: **707 passed, 3 xfailed**.
+
+### Landed 2026-10-03
+
+- **Detector combinations** — 14 "trigger, then zone, then retest" chains
+  (sweep / BOS / cBOS x FVG / IFVG / BPR / order block, with and without an
+  order-flow filter) on 3m-1h, staged at <= 20 arms. 151 arms in-sample: 86
+  negative, 45 indistinguishable from zero, 18 too few trades, 2 above zero —
+  both the same chain (`b3_1h_long`, cBOS -> FVG) in a window where BTC rose
+  4.42x. Gross of costs every chain sits on its random-entry control (median
+  excess -0.02R). The held-out year is unopened. `docs/SETUP_COMBOS.md`.
+- **`copilot/backtest/combo.py`** — a standalone event-stream simulator: each
+  stream is computed once per frame and stamped with the bar at whose close it
+  is known; every chain passes a prefix-invariance test (trades closed before
+  bar N are identical on the frame cut at N). `scripts/run_combo.py`,
+  `scripts/report_combo.py`, `tests/test_combo.py` (101 tests). Suite:
+  **695 passed, 3 xfailed**.
+- **A random-entry control is not minus-costs in a trending window.** A random
+  1h long with a 2R target made about +0.09R gross over the in-sample years.
+  Verdicts against zero flatter long arms; the write-up carries the control
+  beside every arm and proposes it as the reference going forward.
 
 ### Landed 2026-09-15
 
