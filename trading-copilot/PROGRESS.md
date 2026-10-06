@@ -25,8 +25,14 @@ pre-2026-08-27 backtest figure.
   `scripts/fetch_dukascopy.py`, `scripts/measure_xau.py`, 18 tests. The resample
   matches Dukascopy's own m5/h1 bars exactly. A round trip costs one 1.64 bps
   spread against BTC's 12 bps; in R that is a third of BTC's cost on every
-  timeframe. **Nothing has been run on gold**: the combo runner is still
-  BTC-only and needs spread-aware fills first. `docs/DATA_XAUUSD.md`.
+  timeframe. `docs/DATA_XAUUSD.md`.
+- **The trader's example on gold: no edge either.** `run_combo.py --symbol
+  XAUUSD`, stage 1, ten arms, the trader's forex.com costs (0.20 spread, 0.10
+  commission per round trip): eight arms indistinguishable from a same-side
+  random entry, two worse; 3,909 trades, 0.06R below the control on average.
+  `combo.py` now fills through the spread on a bid chart (a long limit trades
+  when the ASK reaches it; a short's stop a spread early) and BTC results are
+  bit-for-bit unchanged. Suite: **735 passed, 3 xfailed**.
 
 - **Detector combinations closed: no edge, out of sample included.** With the
   trader's answers (sessions Asia 02-10 / London 10-18 / New York 15-23 Kyiv,

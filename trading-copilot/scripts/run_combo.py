@@ -1,5 +1,6 @@
 #!/usr/bin/env python
-r"""Detector combinations — staged research on BTCUSDT futures (2026-10-03).
+r"""Detector combinations — staged research on BTCUSDT futures (2026-10-03) and,
+with `--symbol XAUUSD`, on spot gold (2026-10-06).
 
     .venv\Scripts\python.exe scripts/run_combo.py data            # load + verify the frames
     .venv\Scripts\python.exe scripts/run_combo.py run --stage 1   # in-sample only
@@ -7,6 +8,7 @@ r"""Detector combinations — staged research on BTCUSDT futures (2026-10-03).
     .venv\Scripts\python.exe scripts/run_combo.py run --stage 7,8a
     .venv\Scripts\python.exe scripts/run_combo.py sample --arm a1_fractal_15m_long
     .venv\Scripts\python.exe scripts/run_combo.py run --oos b3_1h_long
+    .venv\Scripts\python.exe scripts/run_combo.py --symbol XAUUSD run --stage 1
 
 Spec and results: docs/SETUP_COMBOS.md. Simulator: copilot/backtest/combo.py.
 
@@ -46,6 +48,7 @@ from copilot.backtest.report import bootstrap_expectancy_ci  # noqa: E402
 from copilot.data.base import TF_MINUTES  # noqa: E402
 from copilot.data.binance import fetch_ohlcv_batched  # noqa: E402
 from copilot.data.cache import BatchedOHLCStore  # noqa: E402
+from copilot.data.dukascopy import DukascopySource  # noqa: E402
 from copilot.journal.record import session_from_ts  # noqa: E402
 
 # The ORB window, so the two studies read the same three years.
@@ -64,6 +67,29 @@ TFS = ("3m", "5m", "15m", "30m", "1h")
 SIDES = ("long", "short")
 _SOURCE = "binance_futures"
 _SYMBOL = "BTCUSDT"
+_WARMUP = pd.Timestamp("2023-04-13", tz="UTC")      # where the cached BTC 5m history starts
+
+
+@dataclass(frozen=True)
+class Instrument:
+    symbol: str
+    prefix: str            # result files are {prefix}_stage{N}.json
+    label: str
+    cost_text: str
+    costs: dict            # ComboParams fields that carry the cost model
+    two_prices: bool       # a bid chart with a quoted ask alongside
+
+
+INSTRUMENTS = {
+    "BTCUSDT": Instrument("BTCUSDT", "combo", "BTCUSDT.P", "6 bps на сторону", {}, False),
+    # The trader's forex.com account (2026-10-06): a floating spread of about 20
+    # points, i.e. 0.20 in price, and 5 USD per 100 oz lot — read as per side,
+    # so 0.10 per ounce for the round trip. The frames are Dukascopy's bid chart;
+    # its own quoted spread (about three times wider) is run as a sensitivity.
+    "XAUUSD": Instrument("XAUUSD", "combo_xau", "XAUUSD спот", "спред 0.20, комиссия 0.10 за круг",
+                         {"cost_bps": 0.0, "cost_abs": 0.10, "spread": 0.20}, True),
+}
+_INSTR = INSTRUMENTS["BTCUSDT"]
 
 
 @dataclass(frozen=True)
@@ -122,24 +148,46 @@ def _load_3m(start: pd.Timestamp, chunk: int = 90_000) -> pd.DataFrame:
     return df[(df.index >= start) & (df.index < _END)]
 
 
-_FRAMES: dict[str, pd.DataFrame] = {}
+_FRAMES: dict[tuple[str, str], pd.DataFrame] = {}
+_SPREADS: dict[str, np.ndarray] = {}
 
 
 def frame(tf: str) -> pd.DataFrame:
-    if tf not in _FRAMES:
-        base = _base_5m()
-        if tf == "5m":
-            _FRAMES[tf] = base
-        elif tf == "3m":
-            _FRAMES[tf] = _load_3m(base.index[0])
+    key = (_INSTR.symbol, tf)
+    if key not in _FRAMES:
+        if _INSTR.two_prices:
+            # Offline, bid side. Bars above 1h are anchored to 17:00 New York.
+            _FRAMES[key] = DukascopySource().history(_INSTR.symbol, tf, _WARMUP, _END)
         else:
-            _FRAMES[tf] = _resample(base, tf)
-    return _FRAMES[tf]
+            base = _base_5m()
+            if tf == "5m":
+                _FRAMES[key] = base
+            elif tf == "3m":
+                _FRAMES[key] = _load_3m(base.index[0])
+            else:
+                _FRAMES[key] = _resample(base, tf)
+    return _FRAMES[key]
+
+
+def quoted_spread(tf: str) -> np.ndarray:
+    """Ask minus bid at each bar's close, as the data vendor quoted it."""
+    if tf not in _SPREADS:
+        bid = frame(tf)
+        ask = DukascopySource().history(_INSTR.symbol, tf, _WARMUP, _END, side="ask")
+        gap = (ask["close"].reindex(bid.index).ffill() - bid["close"]).clip(lower=0.0)
+        _SPREADS[tf] = gap.fillna(gap.median()).to_numpy(np.float64)
+    return _SPREADS[tf]
 
 
 def data() -> int:
     """Load every frame, report coverage and gaps, check the resample against
     the 30m and 1h klines Binance itself served (still on disk from earlier runs)."""
+    if _INSTR.two_prices:
+        for tf in TFS:
+            df = frame(tf)
+            print(f"{tf:>4}: {len(df):7d} баров  {df.index[0]} .. {df.index[-1]}")
+        print("календарь и сверка ресемпла: scripts/measure_xau.py calendar | verify")
+        return 0
     ok = True
     for tf in TFS:
         df = frame(tf)
@@ -181,12 +229,13 @@ def _arms(chain: str, tfs: tuple[str, ...], pool: str = "fractal") -> list[Arm]:
     """One arm per timeframe and side. Only the sweep chains have a pool, so only
     their names carry it."""
     tag = f"{chain.lower()}_{pool}" if chain in _SWEEP_CHAINS else chain.lower()
-    return [Arm(f"{tag}_{tf}_{side}", tf, ComboParams(chain=chain, pool=pool, side=side))
+    return [Arm(f"{tag}_{tf}_{side}", tf,
+                ComboParams(chain=chain, pool=pool, side=side, **_INSTR.costs))
             for tf in tfs for side in SIDES]
 
 
 def kept_tfs() -> tuple[str, ...]:
-    path = _OUT / "combo_stage1.json"
+    path = _OUT / f"{_INSTR.prefix}_stage1.json"
     if not path.exists():
         raise RuntimeError("stage 1 has not been run: the timeframe cull comes from it")
     return tuple(json.loads(path.read_text(encoding="utf-8"))["tf_cull"]["kept"])
@@ -211,7 +260,7 @@ STAGES = ("1", *_STAGES, "7", "8a", "8b")
 def _results(stages: tuple[str, ...]) -> list[dict]:
     rows = []
     for stage in stages:
-        path = _OUT / f"combo_stage{stage}.json"
+        path = _OUT / f"{_INSTR.prefix}_stage{stage}.json"
         if not path.exists():
             raise RuntimeError(f"stage {stage} has not been run")
         rows += json.loads(path.read_text(encoding="utf-8"))["arms"]
@@ -308,7 +357,6 @@ def _stats(trades: pd.DataFrame, months: float) -> dict:
         return out
     r = t["r"]
     gain, loss = r[r > 0].sum(), -r[r < 0].sum()
-    maker = t["gross_r"] - _maker_cost_r(t)
     out.update({
         "per_month": round(len(t) / months, 1),
         "winrate": round(float((t["exit_kind"] == "tp").mean()), 4),
@@ -317,13 +365,17 @@ def _stats(trades: pd.DataFrame, months: float) -> dict:
         "pf": round(float(gain / loss), 3) if loss > 0 else None,
         "gross_r": round(float(t["gross_r"].mean()), 3),
         "gross_r_ci": _ci(t["gross_r"]),
-        "maker_r": round(float(maker.mean()), 3),
-        "maker_r_ci": _ci(maker),
         "median_risk_pct": round(float(t["risk_pct"].median()), 4),
         "median_risk_atr": round(float(t["risk_atr"].median()), 3),
-        "median_cost_r": round(float(t["cost_r"].median()), 3),
+        # Commission plus what the spread is worth: the spread is not charged (it
+        # is in the fills), but it is a cost of the round trip all the same.
+        "median_cost_r": round(float((t["cost_r"] + t["spread_r"]).median()), 3),
         "floor_share": round(float(t["floor_hit"].mean()), 4),
     })
+    if not _INSTR.two_prices:
+        # A fee schedule in bps of notional; it says nothing about a spread instrument.
+        maker = t["gross_r"] - _maker_cost_r(t)
+        out.update(maker_r=round(float(maker.mean()), 3), maker_r_ci=_ci(maker))
     return out
 
 
@@ -424,9 +476,12 @@ def random_control(df: pd.DataFrame, t: pd.DataFrame, params: ComboParams,
     risk_pcts = np.tile(closed["risk_pct"].to_numpy(), draws)
     rrs = np.tile(((closed["tp"] - closed["entry"]).abs() / (closed["entry"] - closed["stop"]).abs()).to_numpy(), draws)
     gross, net = [], []
+    # The side that buys pays the spread: a long on the way in (it buys at the
+    # ask), a short on the way out (its stop and target trade at the ask).
+    spread = params.spread
     for risk_pct, rr in zip(risk_pcts, rrs):
         i = int(rng.integers(a, b))
-        entry = o[i]
+        entry = o[i] + spread if long_side else o[i]
         risk = entry * risk_pct / 100.0
         stop = entry - risk if long_side else entry + risk
         tp = entry + rr * risk if long_side else entry - rr * risk
@@ -437,8 +492,8 @@ def random_control(df: pd.DataFrame, t: pd.DataFrame, params: ComboParams,
                 hit_sl = low[j:k] <= stop
                 hit_tp = h[j:k] >= tp
             else:
-                hit_sl = h[j:k] >= stop
-                hit_tp = low[j:k] <= tp
+                hit_sl = h[j:k] >= stop - spread
+                hit_tp = low[j:k] <= tp - spread
             hit = np.flatnonzero(hit_sl | hit_tp)
             if len(hit):
                 exit_px = stop if hit_sl[hit[0]] else tp          # stop wins a shared bar
@@ -447,7 +502,7 @@ def random_control(df: pd.DataFrame, t: pd.DataFrame, params: ComboParams,
             continue
         g = (exit_px - entry) / risk * (1 if long_side else -1)
         gross.append(g)
-        net.append(g - (entry + exit_px) * params.cost_bps / 10_000 / risk)
+        net.append(g - ((entry + exit_px) * params.cost_bps / 10_000 + params.cost_abs) / risk)
     if not gross:
         return {}, np.empty(0)
     summary = {"n": len(gross), "gross_r": round(float(np.mean(gross)), 3),
@@ -506,8 +561,19 @@ def run_arm(arm: Arm, oos: bool = False, with_flow: bool = True) -> dict:
         arm_net = t.loc[t["closed"], "r"].to_numpy()
         stats["excess_r"] = round(float(arm_net.mean() - control_net.mean()), 3)
         stats["excess_r_ci"] = excess_ci(arm_net, control_net)
+    quoted = None
+    if _INSTR.two_prices:
+        # Same arm, fills under the spread Dukascopy actually quoted on each bar
+        # instead of the account's constant one. A reading, not another arm.
+        q = simulate(df, arm.params, fl, gate, htf, spread=quoted_spread(arm.tf)[:len(df)]).trades
+        q = q[(q["known_ts"] >= lo) & (q["known_ts"] < hi) & q["closed"]]
+        quoted = {"n": int(len(q))}
+        if len(q):
+            quoted.update(mean_r=round(float(q["r"].mean()), 3), mean_r_ci=_ci(q["r"]),
+                          median_spread_r=round(float(q["spread_r"].median()), 3))
     row = {
         "name": arm.name, "tf": arm.tf, "side": arm.params.side, "htf": arm.htf,
+        "quoted_spread": quoted,
         "window": "OOS" if oos else "IS", "params": asdict(arm.params),
         "funnel_whole_frame": res.funnel, "stats": stats, "verdict": _verdict(stats),
         "verdict_control": _verdict_vs_control(stats),
@@ -553,23 +619,24 @@ def run(stage: str | None, only: str | None, oos: str | None, with_flow: bool) -
             raise SystemExit(f"неизвестные армы: {missing}")
         if len(names) > 5:
             raise SystemExit("в OOS идёт не больше 5 арм")
-        arms, out_path, is_oos = [known[n] for n in names], _OUT / "combo_oos.json", True
+        arms, out_path, is_oos = [known[n] for n in names], _OUT / f"{_INSTR.prefix}_oos.json", True
     else:
         arms = stage_arms(stage)
         if only:
             wanted = {n.strip() for n in only.split(",")}
             arms = [a for a in arms if a.name in wanted]
-        out_path, is_oos = _OUT / f"combo_stage{stage}.json", False
+        out_path, is_oos = _OUT / f"{_INSTR.prefix}_stage{stage}.json", False
     assert len(arms) <= 20, "a stage is at most 20 arms (RESEARCH_PROTOCOL §7)"
 
     window = f"{_SPLIT.date()} .. {_END.date()} (OOS)" if is_oos else f"{_START.date()} .. {_SPLIT.date()} (IS)"
-    print(f"{len(arms)} арм, окно {window}, издержки 6 bps на сторону")
+    print(f"{_INSTR.label}: {len(arms)} арм, окно {window}, издержки: {_INSTR.cost_text}")
     rows: list[dict] = []
     for arm in arms:
         row = run_arm(arm, oos=is_oos, with_flow=with_flow)
         rows.append(row)
         print(_fmt(row), flush=True)
-        payload = {"stage": stage, "window": window, "arms": rows}
+        payload = {"symbol": _INSTR.symbol, "stage": stage, "window": window,
+                   "costs": _INSTR.cost_text, "arms": rows}
         if stage == "1" and not only and not is_oos:
             payload["tf_cull"] = _tf_cull(rows)
         out_path.write_text(json.dumps(payload, ensure_ascii=False, indent=1, default=str),
@@ -594,7 +661,7 @@ def sample(arm_name: str, count: int, seed: int, since: str | None = None) -> in
     t = t[(t["known_ts"] >= floor) & t["closed"]]
     pick = t.sample(n=min(count, len(t)), random_state=seed).sort_values("entry_ts")
     kyiv = lambda ts: ts.tz_convert(_KYIV).strftime("%d.%m.%Y %H:%M")  # noqa: E731
-    print(f"{arm_name}: {len(pick)} из {len(t)} сделок IS, BTCUSDT.P {arm.tf}, время Киев")
+    print(f"{arm_name}: {len(pick)} из {len(t)} сделок IS, {_INSTR.label} {arm.tf}, время Киев")
     for _, r in pick.iterrows():
         print(f"  триггер {kyiv(r['trigger_ts'])}  сетап на закрытии свечи {kyiv(r['known_ts'])}  "
               f"вход {kyiv(r['entry_ts'])} @ {r['entry']:.1f}  стоп {r['stop']:.1f}  "
@@ -604,6 +671,7 @@ def sample(arm_name: str, count: int, seed: int, since: str | None = None) -> in
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--symbol", default="BTCUSDT", choices=sorted(INSTRUMENTS))
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("data")
     r = sub.add_parser("run")
@@ -617,6 +685,8 @@ def main() -> int:
     s.add_argument("--seed", type=int, default=20261003)
     s.add_argument("--since", help="YYYY-MM-DD: only trades from this date (still in-sample)")
     args = ap.parse_args()
+    global _INSTR
+    _INSTR = INSTRUMENTS[args.symbol]
     if args.cmd == "data":
         return data()
     if args.cmd == "sample":

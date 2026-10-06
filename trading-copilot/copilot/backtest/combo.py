@@ -36,6 +36,11 @@ Execution rules, each one a place earlier setups of this project went wrong:
     reaches both; a take-profit on the fill bar counts only if that bar CLOSED
     beyond it — the high may predate the fill, the close cannot;
   - a setup whose stop would sit on the wrong side of the entry is not a trade;
+  - on a two-price instrument the frame is the BID chart and `spread` says how
+    far the ask sits above it. A buy trades at the ask: a long limit at L fills
+    only once the bid is a spread BELOW L, and a short's stop is hit a spread
+    before the bid reaches it, its target a spread after. Levels stay where
+    the chart puts them; only the moment they trade moves;
   - zone state is tracked here, bar by bar. Detector fields such as `fill_state`
     or `is_mitigated` describe the END of the slice and are never read.
 """
@@ -85,7 +90,9 @@ class ComboParams:
     link_bars: int = 20             # sweep -> confirming break / inversion, at most
     ob_swing_k: int = 5             # swing width of the order-block scan (detector default)
     min_stop_atr: float = 0.5       # stop floor, ATR at the bar the setup is known
-    cost_bps: float = 6.0           # fee + slippage per side
+    cost_bps: float = 6.0           # fee + slippage per side, of notional
+    cost_abs: float = 0.0           # commission per round trip, in price units per unit traded
+    spread: float = 0.0             # ask minus bid, in price units; the frame is the bid chart
 
 
 @dataclass(frozen=True)
@@ -842,14 +849,32 @@ def _finish(ctx: _Ctx, raw: list[_Setup]) -> list[_Setup]:
 # ── Execution ───────────────────────────────────────────────────────────────
 
 def _execute(b: _Bars, setups: list[_Setup], p: ComboParams,
-             can_fill: np.ndarray | None = None) -> tuple[list[dict], dict]:
+             can_fill: np.ndarray | None = None,
+             entry_gap: np.ndarray | None = None,
+             exit_gap: np.ndarray | None = None) -> tuple[list[dict], dict]:
     """`can_fill`, if given, marks the bars a limit may fill on. A touch on any
-    other bar spends the zone: the order is dropped, not carried into the window."""
+    other bar spends the zone: the order is dropped, not carried into the window.
+
+    `entry_gap` and `exit_gap` are per-bar distances, in price, between the
+    charted price and the price the order actually trades at — the spread, on
+    whichever side of the trade buys. In the arm's (long) space:
+
+        entry_gap   the limit fills when the low is this far BELOW its level
+                    (a long buys at the ask, which sits above the charted bid);
+        exit_gap    the stop triggers this far ABOVE its level and the target
+                    this far beyond it (a short buys back at the ask).
+
+    A long arm has an entry gap and no exit gap, a short arm the reverse. Fills
+    are booked at the level itself: the gap moves the moment, not the price.
+    """
     funnel = {"skipped_in_position": 0, "replaced": 0, "expired": 0, "ran_away": 0,
               "gapped_through_stop": 0, "outside_window": 0, "filled": 0, "unfinished": 0}
     trades: list[dict] = []
     n = len(b.c)
     o, h, lo, c = b.o, b.h, b.l, b.c
+    zero = np.zeros(n)
+    eg = zero if entry_gap is None else entry_gap
+    xg = zero if exit_gap is None else exit_gap
     pos: dict | None = None
     pend: _Setup | None = None
     place_i = 0
@@ -863,36 +888,36 @@ def _execute(b: _Bars, setups: list[_Setup], p: ComboParams,
 
     for i in range(n):
         if pos is not None:
-            if lo[i] <= pos["stop"]:
-                close(pos, i, min(o[i], pos["stop"]), "sl")
+            if lo[i] <= pos["stop"] + xg[i]:
+                close(pos, i, min(o[i] - xg[i], pos["stop"]), "sl")
                 pos = None
-            elif h[i] >= pos["tp"]:
+            elif h[i] >= pos["tp"] + xg[i]:
                 close(pos, i, pos["tp"], "tp")
                 pos = None
         elif pend is not None and i >= place_i:
             if i - place_i >= p.max_wait_bars:
                 funnel["expired"] += 1
                 pend = None
-            elif lo[i] <= pend.entry:
+            elif lo[i] <= pend.entry - eg[i]:
                 if can_fill is not None and not can_fill[i]:
                     funnel["outside_window"] += 1
-                elif o[i] <= pend.stop:
+                elif o[i] <= pend.stop + xg[i]:
                     # Opened beyond the stop: the limit would fill straight
                     # into a stopped-out position at an undefined risk.
                     funnel["gapped_through_stop"] += 1
                 else:
                     funnel["filled"] += 1
                     trade = {"known_i": pend.known_i, "trigger_i": pend.trigger_i,
-                             "entry_i": i, "entry": min(o[i], pend.entry),
+                             "entry_i": i, "entry": min(o[i] + eg[i], pend.entry),
                              "stop": pend.stop, "tp": tp, "floor_hit": pend.floor_hit}
-                    if lo[i] <= pend.stop:
+                    if lo[i] <= pend.stop + xg[i]:
                         close(trade, i, pend.stop, "sl")
-                    elif c[i] >= tp:
+                    elif c[i] >= tp + xg[i]:
                         close(trade, i, tp, "tp")
                     else:
                         pos = trade
                 pend = None
-            elif h[i] >= tp:
+            elif h[i] >= tp + xg[i]:
                 # Reached the target without coming back for us.
                 funnel["ran_away"] += 1
                 pend = None
@@ -921,7 +946,7 @@ def _execute(b: _Bars, setups: list[_Setup], p: ComboParams,
 TRADE_COLUMNS = [
     "known_ts", "trigger_ts", "entry_ts", "exit_ts", "side", "entry", "stop", "tp",
     "exit", "exit_kind", "closed", "floor_hit", "risk_pct", "risk_atr", "gross_r",
-    "cost_r", "r", "known_i", "trigger_i", "entry_i", "exit_i",
+    "cost_r", "spread_r", "r", "known_i", "trigger_i", "entry_i", "exit_i",
 ]
 
 
@@ -935,7 +960,8 @@ def sweep_bars(df: pd.DataFrame, params: ComboParams = ComboParams()) -> np.ndar
 
 def simulate(df: pd.DataFrame, params: ComboParams = ComboParams(),
              flow: FlowStreams | None = None, gate: np.ndarray | None = None,
-             htf: tuple[pd.DataFrame, int, int] | None = None) -> ComboResult:
+             htf: tuple[pd.DataFrame, int, int] | None = None,
+             spread: np.ndarray | None = None) -> ComboResult:
     """Run one arm over `df` (canonical OHLCV, UTC index).
 
     `gate`, if given, is one boolean per bar: a setup that becomes known on a
@@ -948,6 +974,10 @@ def simulate(df: pd.DataFrame, params: ComboParams = ComboParams(),
     3-candle fractals beyond the entry that is confirmed and unbroken when the
     setup arises; a setup with no such fractal, or one paying less than
     `params.min_rr`, is not traded. The frame must not run past `df`.
+
+    `spread`, if given, is the ask-minus-bid distance on each bar and replaces
+    the constant `params.spread`. Either way `df` is then the BID chart; see
+    `_execute` for what the spread does to fills.
 
     `flow` is `flow_streams(df)` — required by the chains in `FLOW_CHAINS`, and
     passed in rather than computed here because it is the one slow stream and is
@@ -980,7 +1010,11 @@ def simulate(df: pd.DataFrame, params: ComboParams = ComboParams(),
     if params.fill_hours_ny is not None:
         hour = df.index.tz_convert(_NY).hour.to_numpy()
         can_fill = (hour >= params.fill_hours_ny[0]) & (hour < params.fill_hours_ny[1])
-    raw, exec_funnel = _execute(b, setups, params, can_fill)
+    gap = np.broadcast_to(np.asarray(params.spread if spread is None else spread, np.float64),
+                          (len(df),))
+    # The side that BUYS pays the spread: a long on the way in, a short on the way out.
+    entry_gap, exit_gap = (None, gap) if short else (gap, None)
+    raw, exec_funnel = _execute(b, setups, params, can_fill, entry_gap, exit_gap)
     funnel = {**ctx.funnel, **exec_funnel}
 
     index = df.index
@@ -990,7 +1024,8 @@ def simulate(df: pd.DataFrame, params: ComboParams = ComboParams(),
         closed = t["exit_kind"] != "open"
         risk = abs(entry - stop)
         gross_r = sign * (exit_px - entry) / risk if closed else np.nan
-        cost_r = (entry + exit_px) * params.cost_bps / 10_000 / risk if closed else np.nan
+        cost_r = (((entry + exit_px) * params.cost_bps / 10_000 + params.cost_abs) / risk
+                  if closed else np.nan)
         rows.append({
             "known_ts": index[t["known_i"]],
             "trigger_ts": index[t["trigger_i"]],
@@ -1008,6 +1043,8 @@ def simulate(df: pd.DataFrame, params: ComboParams = ComboParams(),
             "risk_atr": risk / real.atr[t["known_i"]],
             "gross_r": gross_r,
             "cost_r": cost_r,
+            # Not a charge: the spread is already in the fills. What it is worth in R.
+            "spread_r": float(gap[t["entry_i"]]) / risk,
             "r": gross_r - cost_r,
             "known_i": t["known_i"],
             "trigger_i": t["trigger_i"],

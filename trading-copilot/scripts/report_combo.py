@@ -21,10 +21,11 @@ for _s in (sys.stdout, sys.stderr):
 
 _OUT = Path(__file__).resolve().parent.parent / "research" / "runs"
 _ORDER = ("1", "2a", "2b", "3a", "3b", "4a", "4b", "5a", "5b", "6", "7", "8a", "8b")
+_PREFIX = "combo"            # "combo_xau" for gold: --prefix
 
 
 def _load(stage: str) -> list[dict]:
-    path = _OUT / ("combo_oos.json" if stage == "oos" else f"combo_stage{stage}.json")
+    path = _OUT / (f"{_PREFIX}_oos.json" if stage == "oos" else f"{_PREFIX}_stage{stage}.json")
     if not path.exists():
         return []
     rows = json.loads(path.read_text(encoding="utf-8"))["arms"]
@@ -77,7 +78,10 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--stage")
     ap.add_argument("--chains", action="store_true", help="the pooled chain x timeframe table")
+    ap.add_argument("--prefix", default="combo", help="result file prefix: combo | combo_xau")
     args = ap.parse_args()
+    global _PREFIX
+    _PREFIX = args.prefix
     stages = [args.stage] if args.stage else list(_ORDER)
     every: list[dict] = []
     for stage in stages:

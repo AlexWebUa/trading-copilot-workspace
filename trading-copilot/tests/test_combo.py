@@ -275,6 +275,71 @@ class TestHigherTimeframeTarget:
             simulate(_df(_base(RETEST, RALLY)), self.P)
 
 
+class TestSpread:
+    """Two-price instrument: the frame is the bid chart, the ask sits `spread`
+    above it. The base setup is a long limit at 100, stop 99, target 102."""
+
+    S = 0.15
+    DEEP: Row = (101.0, 101.1, 99.8, 100.5)        # bid 99.8: the ask reaches 99.95
+
+    def test_long_limit_needs_the_ask_not_the_bid_to_reach_it(self):
+        rows = _base(RETEST, RALLY)                  # bid low 99.9: the ask only got to 100.05
+        assert len(simulate(_df(rows)).trades) == 1
+        assert simulate(_df(rows), ComboParams(spread=self.S)).trades.empty
+
+    def test_long_fills_at_its_level_once_the_ask_is_there(self):
+        t = _only(simulate(_df(_base(self.DEEP, RALLY)), ComboParams(spread=self.S)))
+        assert (t["entry"], t["stop"], t["exit"], t["exit_kind"]) == (100.0, 99.0, 102.0, "tp")
+        assert t["gross_r"] == pytest.approx(2.0)
+        assert t["spread_r"] == pytest.approx(0.15)
+
+    def test_long_opening_through_the_limit_buys_at_the_opening_ask(self):
+        gap_open: Row = (99.7, 100.4, 99.6, 100.2)
+        t = _only(simulate(_df(_base(gap_open, RALLY)), ComboParams(spread=self.S)))
+        assert t["entry"] == pytest.approx(99.85)
+
+    def test_short_sells_on_the_bid_chart_touch(self):
+        rows = _mirror(_base(RETEST, RALLY))         # sell limit 100, stop 101, target 98
+        t = _only(simulate(_df(rows), ComboParams(side="short", spread=self.S)))
+        assert (t["entry"], t["stop"], t["exit"], t["exit_kind"]) == (100.0, 101.0, 98.0, "tp")
+
+    def test_short_stop_is_hit_a_spread_before_the_bid_gets_there(self):
+        near_stop: Row = (99.5, 100.9, 99.4, 99.6)   # bid high 100.9: the ask printed 101.05
+        rows = _mirror(_base(RETEST)) + [near_stop]
+        assert not simulate(_df(rows), ComboParams(side="short")).trades.iloc[0]["closed"]
+        t = _only(simulate(_df(rows), ComboParams(side="short", spread=self.S)))
+        assert (t["exit_kind"], t["exit"]) == ("sl", 101.0)
+
+    def test_short_target_needs_the_ask_to_come_down_to_it(self):
+        near_target: Row = (99.5, 99.6, 97.9, 98.2)  # bid low 97.9: the ask stopped at 98.05
+        rows = _mirror(_base(RETEST)) + [near_target]
+        assert _only(simulate(_df(rows), ComboParams(side="short")))["exit_kind"] == "tp"
+        assert not _only(simulate(_df(rows), ComboParams(side="short", spread=self.S)))["closed"]
+
+    def test_per_bar_spread_replaces_the_constant(self):
+        rows = _base(self.DEEP, RALLY)
+        wide = np.zeros(len(rows))
+        wide[T + 3] = 0.5                            # the retest bar: the ask never got near
+        assert simulate(_df(rows), ComboParams(), spread=wide).trades.empty
+        assert len(simulate(_df(rows), ComboParams(), spread=np.zeros(len(rows))).trades) == 1
+
+    def test_commission_per_round_trip_is_charged_in_price_units(self):
+        t = _only(simulate(_df(_base(RETEST, RALLY)), ComboParams(cost_bps=0.0, cost_abs=0.10)))
+        assert t["cost_r"] == pytest.approx(0.10)    # 0.10 against a risk of 1.00
+        assert t["r"] == pytest.approx(1.90)
+
+    @pytest.mark.parametrize("side", ["long", "short"])
+    def test_spread_does_not_break_causality(self, walk, side):
+        df, _ = walk
+        params = ComboParams(side=side, spread=0.05)
+        full = simulate(df, params).trades
+        assert len(full[full["closed"]]) >= 10
+        for cut in (9_700, 22_600, 29_999):
+            part = simulate(df.iloc[:cut], params).trades
+            want = full[full["closed"] & (full["exit_i"] < cut)].reset_index(drop=True)
+            pd.testing.assert_frame_equal(part[part["closed"]].reset_index(drop=True), want)
+
+
 class TestOrderLife:
     def test_limit_fills_on_its_twentieth_bar(self):
         res = simulate(_df(_base(*[ABOVE] * 19, RETEST, RALLY)))
