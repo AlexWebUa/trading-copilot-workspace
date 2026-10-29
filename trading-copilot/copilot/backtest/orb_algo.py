@@ -67,7 +67,9 @@ class OrbParams:
     # Binance crypto symbols (verified against the trader's 12-13 Sep 2026
     # screenshot). "ny_open" is 09:30 America/New_York, DST-aware — a TradingView
     # custom session typed in UTC would NOT follow DST and would open an hour
-    # early from November to March.
+    # early from November to March. "session" is the first bar of a trading
+    # day on a market that closes — 18:00 New York on spot gold, which is what
+    # `session.isfirstbar_regular` gives there.
     anchor: str = "utc0"
     orb_minutes: int = 30
     sensitivity: str = "Medium"
@@ -87,6 +89,13 @@ class OrbParams:
     stop_first: bool = False
     skip_entry_bar: bool = False
     cost_bps: float = 0.0
+    # A market that closes. `cost_abs` is the whole round trip in price units —
+    # spread plus commission; the entry is a market order at the close, so the
+    # spread is a plain cost here. `gap_stop` fills a stop at the open when the
+    # bar opened beyond it: a position carried over a weekend does not get its
+    # stop price on Monday.
+    cost_abs: float = 0.0
+    gap_stop: bool = False
 
     def honest(self, cost_bps: float = 6.0) -> "OrbParams":
         """Same strategy, every flattering behaviour fixed, costs charged."""
@@ -167,7 +176,16 @@ def _session_starts(index: pd.DatetimeIndex, anchor: str) -> np.ndarray:
             for d in uniq
         ], dtype=np.int64)
         anchor_ns = opens[np.searchsorted(uniq, day)]
-        starts[1:] = (ts[1:] >= anchor_ns[1:]) & (ts[:-1] < anchor_ns[1:])
+        # The first bar at or after the anchor — and close to it. Without the
+        # second test a market that was shut at 09:30 "opens its session" on
+        # the first bar that trades afterwards: Sunday 18:00 New York, on gold.
+        starts[1:] = ((ts[1:] >= anchor_ns[1:]) & (ts[:-1] < anchor_ns[1:])
+                      & (ts[1:] - anchor_ns[1:] < 30 * _NS_PER_MIN))
+        return starts
+    if anchor == "session":
+        from copilot.data.dukascopy import trading_day
+        session = trading_day(index).asi8
+        starts[1:] = session[1:] != session[:-1]
         return starts
     raise ValueError(f"unknown anchor {anchor!r}")
 
@@ -188,6 +206,7 @@ def simulate(
         raise ValueError(f"sensitivity {params.sensitivity!r}")
     need = _RETESTS_NEEDED[params.sensitivity]
 
+    gap_open = df["open"].to_numpy(np.float64) if params.gap_stop else None
     h = df["high"].to_numpy(np.float64)
     lo = df["low"].to_numpy(np.float64)
     c = df["close"].to_numpy(np.float64)
@@ -275,10 +294,10 @@ def simulate(
             if params.skip_entry_bar and i == cur.entry_i:
                 continue
             if params.stop_first:
-                _check_stop(cur, i, h, lo, exclude_tp_bars=False)
+                _check_stop(cur, i, h, lo, exclude_tp_bars=False, gap_open=gap_open)
             _take_profits(cur, i, h, lo, c, ema, params)
             if not params.stop_first:
-                _check_stop(cur, i, h, lo, exclude_tp_bars=True)
+                _check_stop(cur, i, h, lo, exclude_tp_bars=True, gap_open=gap_open)
 
     return OrbResult(params, orbs, _trades(orbs, df.index, params), df.index)
 
@@ -354,7 +373,7 @@ def _ratios(p: OrbParams) -> tuple[float, float, float]:
     return (1.0, 0.0, 0.0) if p.tp_method == "FixedR" else p.exit_ratios
 
 
-def _check_stop(orb: _Orb, i: int, h, lo, exclude_tp_bars: bool) -> None:
+def _check_stop(orb: _Orb, i: int, h, lo, exclude_tp_bars: bool, gap_open=None) -> None:
     if orb.sl_px is None or orb.sl_i is not None:
         return
     hit = (orb.bull and lo[i] < orb.sl_px) or (not orb.bull and h[i] > orb.sl_px)
@@ -362,6 +381,12 @@ def _check_stop(orb: _Orb, i: int, h, lo, exclude_tp_bars: bool) -> None:
         return
     if exclude_tp_bars and i in orb.tp_i:
         return
+    if gap_open is not None:
+        # Opened beyond the stop: it trades at the open, not at its own price.
+        if orb.bull and gap_open[i] < orb.sl_px:
+            orb.sl_px = float(gap_open[i])
+        elif not orb.bull and gap_open[i] > orb.sl_px:
+            orb.sl_px = float(gap_open[i])
     orb.sl_i = i
     orb.exit_kind = "sl"
 
@@ -467,7 +492,8 @@ def _trades(orbs: list, index: pd.DatetimeIndex, p: OrbParams) -> pd.DataFrame:
         if closed and orb.sl_i != -1 and remaining > 1e-12:
             gross += remaining * sign * (orb.sl_px - entry) / entry * 100.0
             exit_notional += remaining * orb.sl_px / entry
-        cost = p.cost_bps / 100.0 * (1.0 + exit_notional) if closed else 0.0
+        cost = (p.cost_bps / 100.0 * (1.0 + exit_notional) + p.cost_abs / entry * 100.0
+                if closed else 0.0)
         net = gross - cost
         risk_pct = abs(entry - orb.sl_init) / entry * 100.0
         rows.append({

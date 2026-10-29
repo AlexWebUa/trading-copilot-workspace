@@ -87,7 +87,8 @@ INSTRUMENTS = {
     # so 0.10 per ounce for the round trip. The frames are Dukascopy's bid chart;
     # its own quoted spread (about three times wider) is run as a sensitivity.
     "XAUUSD": Instrument("XAUUSD", "combo_xau", "XAUUSD спот", "спред 0.20, комиссия 0.10 за круг",
-                         {"cost_bps": 0.0, "cost_abs": 0.10, "spread": 0.20}, True),
+                         {"cost_bps": 0.0, "cost_abs": 0.10, "spread": 0.20, "day_start": "ny17"},
+                         True),
 }
 _INSTR = INSTRUMENTS["BTCUSDT"]
 
@@ -450,11 +451,13 @@ def _diagnostics(arm: Arm, t: pd.DataFrame, fl: FlowStreams | None) -> dict:
 
 def random_control(df: pd.DataFrame, t: pd.DataFrame, params: ComboParams,
                    lo: pd.Timestamp, hi: pd.Timestamp,
-                   seed: int = 20261003) -> tuple[dict, np.ndarray]:
+                   seed: int = 20261003,
+                   allowed: np.ndarray | None = None) -> tuple[dict, np.ndarray]:
     """The arm's own trades at random moments: market entry at a random bar's
     open, same side, each trade's own risk in percent and its own planned
     reward-to-risk, same exit rules and costs. Returns a summary and the net R of
-    every draw.
+    every draw. `allowed`, one boolean per bar, restricts the random entries to
+    those bars — the same hours of the day a session-timed setup trades in.
 
     This is what the arm is measured against (RESEARCH_PROTOCOL §2.5, 2026-10-06).
     Zero is the wrong reference in a trending window: over the two in-sample
@@ -476,11 +479,12 @@ def random_control(df: pd.DataFrame, t: pd.DataFrame, params: ComboParams,
     risk_pcts = np.tile(closed["risk_pct"].to_numpy(), draws)
     rrs = np.tile(((closed["tp"] - closed["entry"]).abs() / (closed["entry"] - closed["stop"]).abs()).to_numpy(), draws)
     gross, net = [], []
+    pool = None if allowed is None else np.flatnonzero(allowed[a:b]) + a
     # The side that buys pays the spread: a long on the way in (it buys at the
     # ask), a short on the way out (its stop and target trade at the ask).
     spread = params.spread
     for risk_pct, rr in zip(risk_pcts, rrs):
-        i = int(rng.integers(a, b))
+        i = int(rng.integers(a, b)) if pool is None else int(pool[rng.integers(len(pool))])
         entry = o[i] + spread if long_side else o[i]
         risk = entry * risk_pct / 100.0
         stop = entry - risk if long_side else entry + risk

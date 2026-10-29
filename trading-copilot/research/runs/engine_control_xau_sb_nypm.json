@@ -1,0 +1,81 @@
+{
+ "symbol": "XAUUSD",
+ "tf": "3m",
+ "window": "2023-09-14 .. 2025-09-14",
+ "cost_bps_per_side": 0.6000000000000001,
+ "hours_ny": "14,15",
+ "arms": {
+  "sb_nypm_mkt_long": {
+   "n": 66,
+   "side": "long",
+   "mean_r": 0.432,
+   "mean_r_ci": [
+    0.048,
+    0.838
+   ],
+   "median_risk_pct": 0.1877,
+   "control": {
+    "n": 3029,
+    "gross_r": 0.214,
+    "net_r": 0.123,
+    "excess_r": 0.309,
+    "excess_r_ci": [
+     -0.07,
+     0.712
+    ]
+   },
+   "control_same_hours": {
+    "n": 3026,
+    "gross_r": 0.279,
+    "net_r": 0.187,
+    "excess_r": 0.245,
+    "excess_r_ci": [
+     -0.147,
+     0.634
+    ]
+   },
+   "excess_r": 0.309,
+   "excess_r_ci": [
+    -0.07,
+    0.712
+   ],
+   "verdict_control": "неотличима от случайного"
+  },
+  "sb_nypm_test_short": {
+   "n": 29,
+   "side": "short",
+   "mean_r": 0.283,
+   "mean_r_ci": [
+    -0.344,
+    0.993
+   ],
+   "median_risk_pct": 0.1448,
+   "control": {
+    "n": 3015,
+    "gross_r": -0.134,
+    "net_r": -0.246,
+    "excess_r": 0.529,
+    "excess_r_ci": [
+     -0.119,
+     1.236
+    ]
+   },
+   "control_same_hours": {
+    "n": 3010,
+    "gross_r": -0.189,
+    "net_r": -0.3,
+    "excess_r": 0.583,
+    "excess_r_ci": [
+     -0.058,
+     1.293
+    ]
+   },
+   "excess_r": 0.529,
+   "excess_r_ci": [
+    -0.119,
+    1.236
+   ],
+   "verdict_control": "мало сделок"
+  }
+ }
+}

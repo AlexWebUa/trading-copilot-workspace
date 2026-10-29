@@ -403,6 +403,16 @@ class TestOtherPools:
                           n=96, start="2026-01-05 00:00")
         assert sweep_bars(df, ComboParams(pool="prev_day")).tolist() == [53]
 
+    def test_session_day_starts_at_17_new_york(self):
+        # January, New York = UTC-5: a session runs 22:00 UTC to 22:00 UTC.
+        # Bars are hours from Monday 5 Jan 00:00 UTC. Session A = bars 22-45,
+        # session B = bars 46-69. A's low (95) is set at bar 44, i.e. 20:00 UTC on
+        # Tuesday — on a UTC day that would be Tuesday's own low, not a previous
+        # day's, and bar 47 (Tuesday 23:00 UTC) could not sweep it.
+        df = self._hourly({44: (95.0, 100.0), 47: (94.0, 100.0)}, n=96, start="2026-01-05 00:00")
+        assert sweep_bars(df, ComboParams(pool="prev_day", day_start="ny17")).tolist() == [47]
+        assert sweep_bars(df, ComboParams(pool="prev_day")).tolist() == []
+
     def test_first_day_of_the_frame_is_not_a_previous_day(self):
         df = self._hourly({5: (95.0, 100.0), 30: (94.0, 100.0)}, n=48, start="2026-01-05 00:00")
         assert sweep_bars(df, ComboParams(pool="prev_day")).tolist() == []

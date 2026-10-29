@@ -1320,3 +1320,39 @@ def test_target_resolution_still_gets_the_signal_bar():
     assert min(seen) >= _MIN_LEADING_BARS, (
         f"as-of slice shrank to {min(seen)} bars — detectors need history"
     )
+
+
+def test_ltf_frame_of_a_range_capable_source_is_asked_for_the_backtest_window():
+    """An offline source holds history far past a historical backtest window.
+    Asked for "the last N bars" it returns the END of what it holds — a
+    different period — and the LTF scan then finds nothing without any error.
+    The engine must ask it for the window of the signal frame instead."""
+    htf = _make_hourly_df(n=80)
+    ltf = _make_minutes_df(n=80 * 12 + 50, step_min=5,
+                           start=datetime(2026, 4, 1, 10, tzinfo=timezone.utc))
+    asked: list[dict] = []
+
+    class _RangeSource:
+        def get_ohlc(self, symbol, tf, bars=500, start_time=None, end_time=None):
+            asked.append({"tf": tf, "bars": bars, "start": start_time, "end": end_time})
+            return (htf if tf == "1h" else ltf).copy()
+
+    rule = SetupRule(
+        name="ltf_range_request",
+        direction="long",
+        conditions=[Condition("detect_fvg", "count_active", "gte", 0)],
+        entry_after="next_open",
+        sl_logic="pct:5.0",
+        tp_logic="rr:50.0",
+        entry_tf="5m",
+        entry_after_ltf="signal_close",
+        max_entry_wait_bars_ltf=500,
+    )
+    engine = BacktestEngine(source=_RangeSource(),
+                            detector_registry={"detect_fvg": lambda df, **k: {"count_active": 0}})
+    summary = engine.run("XAUUSD", "1h", rule, bars=80, write_journal=False)
+
+    ltf_call = next(c for c in asked if c["tf"] == "5m")
+    assert pd.Timestamp(ltf_call["start"]) <= htf.index[0]
+    assert pd.Timestamp(ltf_call["end"]) >= htf.index[-1] + pd.Timedelta(hours=1)
+    assert summary.trades, "the LTF path must still produce its entry"

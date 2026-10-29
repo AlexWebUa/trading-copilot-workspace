@@ -308,6 +308,28 @@ def print_walkforward(wf: "WalkForwardSummary") -> None:  # noqa: F821
 # Helpers
 # ---------------------------------------------------------------------------
 
+def dump_trades(trades: "list[TradeRecord]") -> list[dict]:
+    """Finished trades as plain dicts: what a random-entry control needs (side,
+    entry, stop, target) and what it is compared with (the net R).
+
+    The engine reports an expectancy against zero only. In a trending window
+    that flatters one side, so the research runners keep the trades and
+    `scripts/engine_control.py` measures the arm against random entries of the
+    same side with the same stops and targets (RESEARCH_PROTOCOL §2.5).
+    """
+    out = []
+    for t in trades:
+        if t.result == "pending" or t.pnl_r is None:
+            continue
+        out.append({
+            "ts_entry": t.ts_entry, "ts_exit": t.ts_exit, "direction": t.direction,
+            "entry": t.entry_price, "stop": t.sl_price,
+            "tp": t.tp_prices[0] if t.tp_prices else None,
+            "exit": t.exit_price, "pnl_r": t.pnl_r, "result": t.result,
+        })
+    return out
+
+
 def _max_consecutive_losses(pnl_series: list[float]) -> int:
     """Return the longest streak of negative pnl values."""
     max_streak = 0

@@ -53,6 +53,7 @@ from zoneinfo import ZoneInfo
 import numpy as np
 import pandas as pd
 
+from copilot.data.dukascopy import trading_day
 from copilot.detectors.order_flow import detect_order_flow
 from copilot.detectors.smc_lib import true_range_atr
 
@@ -79,6 +80,7 @@ class ComboParams:
     side: str = "long"              # "long" | "short"
     pool: str = "fractal"           # what the sweep takes: see POOLS
     fractal_k: int = 2              # candles each side: 2 = the 5-candle fractal
+    day_start: str = "utc"          # where a day begins for previous-day pools: "utc" | "ny17"
     sweep_tol_atr: float = 0.15     # wick must exceed the pool by this (detect_liquidity default)
     fvg_min_atr: float = 0.1        # minimum gap width (detect_fvg default), ATR at C2
     entry: str = "near"             # "near": first touch of the zone; "ce": its midpoint
@@ -174,13 +176,24 @@ def _day_slices(codes: np.ndarray) -> list[tuple[int, int]]:
     return list(zip(starts.tolist(), ends.tolist()))
 
 
-def _prev_day_pools(b: _Bars, index: pd.DatetimeIndex) -> _Pools:
-    """The previous UTC day's low, live for the whole of the following day.
+def _prev_day_pools(b: _Bars, index: pd.DatetimeIndex, day_start: str = "utc") -> _Pools:
+    """The previous day's low, live for the whole of the following day.
+
+    A day is a UTC calendar day, or with `day_start="ny17"` a trading session
+    that begins at 17:00 New York — spot gold's day, where UTC midnight would
+    cut every session in two. The session before a weekend or a holiday is the
+    previous day of the next session that actually trades.
 
     The frame's first day is skipped as a source: it may be cut short, and a
     partial day's low is not the previous day's low.
     """
-    days = _day_slices(index.tz_convert("UTC").normalize().asi8)
+    if day_start == "utc":
+        codes = index.tz_convert("UTC").normalize().asi8
+    elif day_start == "ny17":
+        codes = trading_day(index).asi8
+    else:
+        raise ValueError(f"day_start {day_start!r}")
+    days = _day_slices(codes)
     level, lo, hi = [], [], []
     for (ps, pe), (s, e) in zip(days[1:], days[2:]):
         level.append(b.l[ps:pe].min())
@@ -227,7 +240,7 @@ def _pools(b: _Bars, index: pd.DatetimeIndex, p: ComboParams) -> _Pools:
     if p.pool == "fractal":
         return _fractal_pools(b, p.fractal_k)
     if p.pool == "prev_day":
-        return _prev_day_pools(b, index)
+        return _prev_day_pools(b, index, p.day_start)
     if p.pool == "session":
         return _session_pools(b, index)
     raise ValueError(f"pool {p.pool!r}")

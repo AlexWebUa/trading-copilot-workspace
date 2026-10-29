@@ -156,3 +156,35 @@ class TestSource:
         out = source.history("XAUUSD", "1h", start=_ts("2026-07-07 10:30"), end=_ts("2026-07-07 12:00"))
         assert out.index.tolist() == [_ts("2026-07-07 10:00"), _ts("2026-07-07 11:00")]
         assert out.iloc[0]["volume"] == 30.0          # only the minutes from 10:30 on
+
+    def test_range_request_returns_the_bars_opening_in_it(self, source):
+        out = source.get_ohlc("XAUUSD", "1h", start_time="2026-07-07T10:00:00+00:00",
+                              end_time="2026-07-07T13:00:00+00:00")
+        assert out.index.tolist() == [_ts("2026-07-07 10:00"), _ts("2026-07-07 11:00"),
+                                      _ts("2026-07-07 12:00")]
+
+    def test_ceiling_hides_everything_from_it_on(self, tmp_path):
+        """A held-out period must be unreadable however the request is sized."""
+        store = BatchedOHLCStore(cache_dir=tmp_path)
+        store.save(source_id("bid"), "XAUUSD", "1m",
+                   _minutes("2026-07-06 22:00", "2026-07-07 21:00"), at_history_start=True)
+        capped = DukascopySource(store, until=_ts("2026-07-07 12:00"))
+        assert capped.get_ohlc("XAUUSD", "1h", bars=10_000).index[-1] == _ts("2026-07-07 11:00")
+        assert capped.history("XAUUSD", "1h", end=_ts("2026-07-07 20:00")).index[-1] == _ts("2026-07-07 11:00")
+        late = capped.get_ohlc("XAUUSD", "1h", start_time="2026-07-07T15:00:00+00:00",
+                               end_time="2026-07-07T18:00:00+00:00")
+        assert late.empty
+
+
+class TestSourceFor:
+    def test_gold_is_served_offline_and_crypto_by_binance(self):
+        from copilot.data.binance import BinanceSource
+        from copilot.data.sources import source_for
+
+        assert isinstance(source_for("xauusd"), DukascopySource)
+        assert isinstance(source_for("BTCUSDT"), BinanceSource)
+
+    def test_ceiling_accepts_a_plain_date_string(self):
+        from copilot.data.sources import source_for
+
+        assert source_for("XAUUSD", "2025-09-14")._until == _ts("2025-09-14")

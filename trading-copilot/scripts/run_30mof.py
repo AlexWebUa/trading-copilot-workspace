@@ -34,6 +34,8 @@ for _stream in (sys.stdout, sys.stderr):
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from copilot.data.sources import source_for  # noqa: E402
+from copilot.backtest.report import dump_trades  # noqa: E402
 from copilot.backtest.engine import BacktestEngine          # noqa: E402
 from copilot.backtest.rules_30mof import (  # noqa: E402
     _ENTRY_MODELS, _ENTRY_MODELS_FULLFILL, _FRACTAL_3,
@@ -139,6 +141,8 @@ def main() -> int:
                     help="Taker fee per side, bps (0 = the old free-trade run)")
     ap.add_argument("--slippage-bps", type=float, default=_SLIPPAGE_BPS,
                     help="Slippage per side, bps")
+    ap.add_argument("--dump-trades", action="store_true",
+                    help="Keep each trade, for scripts/engine_control.py")
     ap.add_argument("--tag", default="",
                     help="Suffix for the output file. Parallel shards MUST each "
                          "pass their own, or they overwrite one another.")
@@ -186,7 +190,9 @@ def main() -> int:
         "arms": {},
     }
 
-    engine = BacktestEngine()
+    # Binance for crypto; the offline download for gold, capped at --end so a
+    # held-out year is never loaded.
+    engine = BacktestEngine(source=source_for(args.symbol, args.end))
     print(f"30mOF stage {args.stage} — {len(rules)} arms, {args.symbol} {args.tf}, "
           f"{args.bars} bars\n")
     started = time.time()
@@ -210,6 +216,8 @@ def main() -> int:
             continue
 
         row = _row(summary)
+        if args.dump_trades:
+            row["trade_list"] = dump_trades(summary.trades)
         row["seconds"] = round(time.time() - t0, 1)
         row["verdict"] = _verdict(row)
         out["arms"][name] = row

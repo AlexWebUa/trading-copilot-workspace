@@ -17,6 +17,21 @@ trades, and its one borderline arm, `sb_nyam_mkt_long`, fell from +0.633R
 (`docs/SETUP_ICT_SILVER_BULLET.md` → прогон 2). Do not quote any
 pre-2026-08-27 backtest figure.
 
+### Done 2026-10-29 — every BTC strategy on gold, in-sample
+
+- Chains (211 arms), ORB (8 cells), Bellissimo (4), Silver Bullet (12) and 30mOF
+  (24) are all scored, the engine arms against a same-side random entry via
+  `scripts/engine_control.py`. Two arms of ~260 beat it — `of30_poi_short` (46
+  trades, itself +0.31R [−0.25, +0.96]) and `a1_session_1h_long` (36 trades) —
+  against six or seven expected by chance. `sb_nypm_mkt_long` clears zero but not a
+  random long. `docs/RESULTS_XAUUSD.md`.
+- The gold held-out year is sealed; opening it for the two candidates is the
+  trader's call.
+- The `SetupRule` engine now runs on an offline source: `data/sources.py`, a hard
+  `until` ceiling on `DukascopySource`, and an LTF request by the backtest's own
+  window. `orb_algo.py` handles a market that closes (session anchor, stops
+  gapped over a weekend, costs in price units). Suite: **745 passed, 3 xfailed**.
+
 ### Landed 2026-10-06
 
 - **XAUUSD is on disk and readable offline.** Dukascopy spot, M1 bid and ask,

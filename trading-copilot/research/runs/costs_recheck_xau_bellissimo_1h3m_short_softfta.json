@@ -1,0 +1,28 @@
+{
+  "symbol": "XAUUSD",
+  "bars": 5000,
+  "start": "2023-09-14T00:00:00Z",
+  "end": "2025-09-14T00:00:00Z",
+  "fee_bps": 0.4,
+  "slippage_bps": 0.2,
+  "arms": {
+    "bellissimo_1h3m_short_softfta": {
+      "signals": 1263,
+      "trades": 117,
+      "wins": 27,
+      "losses": 90,
+      "winrate": 0.2308,
+      "unfinished": 0,
+      "expectancy": -0.313,
+      "expectancy_ci": [
+        -0.559,
+        -0.061
+      ],
+      "profit_factor": 0.621,
+      "skipped_rr": 342,
+      "start": "2023-09-18T04:00:00Z",
+      "end": "2025-09-12T20:00:00Z",
+      "seconds": 423.3
+    }
+  }
+}

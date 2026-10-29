@@ -1,0 +1,113 @@
+{
+ "symbol": "XAUUSD",
+ "tf": "3m",
+ "window": "2023-09-14 .. 2025-09-14",
+ "cost_bps_per_side": 0.6000000000000001,
+ "hours_ny": null,
+ "arms": {
+  "bellissimo_1h3m_long": {
+   "n": 34,
+   "side": "long",
+   "mean_r": 0.056,
+   "mean_r_ci": [
+    -0.441,
+    0.596
+   ],
+   "median_risk_pct": 0.1693,
+   "control": {
+    "n": 3022,
+    "gross_r": 0.216,
+    "net_r": 0.129,
+    "excess_r": -0.073,
+    "excess_r_ci": [
+     -0.595,
+     0.481
+    ]
+   },
+   "excess_r": -0.073,
+   "excess_r_ci": [
+    -0.595,
+    0.481
+   ],
+   "verdict_control": "неотличима от случайного"
+  },
+  "bellissimo_1h3m_long_softfta": {
+   "n": 114,
+   "side": "long",
+   "mean_r": 0.254,
+   "mean_r_ci": [
+    -0.07,
+    0.572
+   ],
+   "median_risk_pct": 0.2251,
+   "control": {
+    "n": 3071,
+    "gross_r": 0.269,
+    "net_r": 0.202,
+    "excess_r": 0.052,
+    "excess_r_ci": [
+     -0.268,
+     0.365
+    ]
+   },
+   "excess_r": 0.052,
+   "excess_r_ci": [
+    -0.268,
+    0.365
+   ],
+   "verdict_control": "неотличима от случайного"
+  },
+  "bellissimo_1h3m_short": {
+   "n": 27,
+   "side": "short",
+   "mean_r": 0.085,
+   "mean_r_ci": [
+    -0.487,
+    0.674
+   ],
+   "median_risk_pct": 0.15,
+   "control": {
+    "n": 3021,
+    "gross_r": -0.117,
+    "net_r": -0.21,
+    "excess_r": 0.295,
+    "excess_r_ci": [
+     -0.255,
+     0.883
+    ]
+   },
+   "excess_r": 0.295,
+   "excess_r_ci": [
+    -0.255,
+    0.883
+   ],
+   "verdict_control": "мало сделок"
+  },
+  "bellissimo_1h3m_short_softfta": {
+   "n": 117,
+   "side": "short",
+   "mean_r": -0.312,
+   "mean_r_ci": [
+    -0.559,
+    -0.061
+   ],
+   "median_risk_pct": 0.1915,
+   "control": {
+    "n": 3037,
+    "gross_r": -0.203,
+    "net_r": -0.274,
+    "excess_r": -0.039,
+    "excess_r_ci": [
+     -0.3,
+     0.236
+    ]
+   },
+   "excess_r": -0.039,
+   "excess_r_ci": [
+    -0.3,
+    0.236
+   ],
+   "verdict_control": "неотличима от случайного"
+  }
+ }
+}

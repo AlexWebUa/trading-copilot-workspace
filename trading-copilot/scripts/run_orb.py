@@ -43,6 +43,7 @@ from copilot.backtest.orb_algo import (  # noqa: E402
 from copilot.backtest.report import bootstrap_expectancy_ci  # noqa: E402
 from copilot.data.base import TF_MINUTES  # noqa: E402
 from copilot.data.binance import BinanceSource, fetch_ohlcv_batched  # noqa: E402
+from copilot.data.dukascopy import DukascopySource  # noqa: E402
 from copilot.detectors.order_flow import detect_order_flow  # noqa: E402
 
 _TV_SCREENSHOT = {
@@ -63,13 +64,42 @@ _COST_BPS = 6.0          # 4 bps taker + 2 bps slippage, per side — the projec
 _OUT = Path(__file__).resolve().parent.parent / "research" / "runs"
 
 _HONEST = {"fill_at_close": True, "stop_first": True, "skip_entry_bar": True}
-_ABLATION = [
-    ("как в TradingView", {}),
-    ("+ тейк по close", {"fill_at_close": True}),
-    ("+ стоп раньше тейка", {"fill_at_close": True, "stop_first": True}),
-    ("+ без бара входа", dict(_HONEST)),
-    ("+ издержки 4+2 bps", {**_HONEST, "cost_bps": _COST_BPS}),
-]
+
+
+class _Market:
+    """What differs between the instruments this script runs on."""
+
+    def __init__(self, symbol, anchors, costs, cost_label, sealed, prefix):
+        self.symbol = symbol
+        self.anchors = anchors          # session anchors that mean something here
+        self.costs = costs              # OrbParams fields carrying the cost model
+        self.cost_label = cost_label
+        self.sealed = sealed            # True: the held-out year is not read at all
+        self.prefix = prefix            # result file prefix
+
+
+_MARKETS = {
+    "BTCUSDT": _Market("BTCUSDT", ("utc0", "ny_open"), {"cost_bps": _COST_BPS},
+                       "4+2 bps", False, "orb"),
+    # Spot gold, the trader's forex.com costs: 0.20 spread + 0.10 commission per
+    # round trip. UTC midnight is mid-session there and means nothing; the
+    # script's own anchor on a market that closes is the first bar of the
+    # trading day (18:00 New York). A position can sit through a weekend, so
+    # stops fill at the open when the market reopens beyond them.
+    "XAUUSD": _Market("XAUUSD", ("session", "ny_open"), {"cost_abs": 0.30, "gap_stop": True},
+                      "спред 0.20 + комиссия 0.10", True, "orb_xau"),
+}
+_MARKET = _MARKETS["BTCUSDT"]
+
+
+def _ablation() -> list:
+    return [
+        ("как в TradingView", {}),
+        ("+ тейк по close", {"fill_at_close": True}),
+        ("+ стоп раньше тейка", {"fill_at_close": True, "stop_first": True}),
+        ("+ без бара входа", dict(_HONEST)),
+        (f"+ издержки {_MARKET.cost_label}", {**_HONEST, **_MARKET.costs}),
+    ]
 
 _FRACTAL_TP = [
     ("1.5R", {"tp_method": "FixedR", "tp_r": 1.5}),
@@ -122,6 +152,8 @@ def load_history(start: pd.Timestamp, end: pd.Timestamp, tf: str = "5m",
     Consecutive chunks share their edge bar, so the coverage store grows as one
     contiguous frame instead of being replaced by a disjoint window.
     """
+    if _MARKET.symbol != "BTCUSDT":
+        return DukascopySource().history(_MARKET.symbol, tf, start, end)   # offline, bid
     frames = []
     cursor = end
     while cursor > start:
@@ -149,6 +181,13 @@ def htf_bias(index: pd.DatetimeIndex, htf: str, warmup_days: int = 120) -> np.nd
     """
     htf_min = TF_MINUTES[htf]
     start = index[0] - pd.Timedelta(days=warmup_days)
+    if _MARKET.symbol != "BTCUSDT":
+        # Cut at the end of the trading frame: nothing of a sealed year is loaded.
+        # 4h bars here are anchored to 17:00 New York, as broker charts draw them.
+        frame = DukascopySource().history(_MARKET.symbol, htf, start,
+                                         index[-1] + pd.Timedelta(minutes=5))
+        flow = detect_order_flow(frame, swing_lookback=1, max_events=10**9, lookback=0)
+        return bias_series(list(reversed(flow.get("events", []))), htf_min, index)
     bars = int((pd.Timestamp.now(tz="UTC") - start) / pd.Timedelta(minutes=htf_min)) + 10
     frame = BinanceSource().get_ohlc("BTCUSDT", htf, bars)
     if frame.index[0] > start:
@@ -198,67 +237,76 @@ def _line(label: str, s: dict) -> str:
 
 
 def sweep() -> int:
-    df = load_history(_START - pd.Timedelta(days=1), _END)
+    end = _SPLIT if _MARKET.sealed else _END
+    df = load_history(_START - pd.Timedelta(days=1), end)
     step = df.index.to_series().diff().dropna()
     gaps = int((step != pd.Timedelta(minutes=5)).sum())
     print(f"5m: {len(df)} баров, {df.index[0]} -> {df.index[-1]}, разрывов {gaps}\n")
 
-    out: dict = {"start": str(_START), "end": str(_END), "split": str(_SPLIT),
-                 "bars": len(df), "gaps": gaps, "anchors": {}}
-    for anchor in ("utc0", "ny_open"):
+    out: dict = {"symbol": _MARKET.symbol, "start": str(_START), "end": str(end),
+                 "split": str(_SPLIT), "bars": len(df), "gaps": gaps, "anchors": {}}
+    for anchor in _MARKET.anchors:
         print(f"=== якорь {anchor}, диапазон 30m, остальное по умолчанию ===")
         rows = {}
         honest = None
-        for label, flags in _ABLATION:
+        for label, flags in _ablation():
             res = simulate(df, OrbParams(anchor=anchor, **flags))
-            full = _window(res, _START, _END)
+            full = _window(res, _START, end)
             s = _stats(full.trades)
             if not flags:
                 s["dashboard"] = dashboard(full)
-                print(f"  дашборд TradingView за 3 года: {s['dashboard']}")
+                print(f"  дашборд TradingView за всё окно: {s['dashboard']}")
             print(_line(label, s))
             rows[label] = s
             honest = res
 
-        t = _window(honest, _START, _END).trades
+        t = _window(honest, _START, end).trades
         closed = t[t["closed"]]
         cost_pct = 2 * _COST_BPS / 100
         extra = {
             "in_sample": _stats(_window(honest, _START, _SPLIT).trades),
-            "held_out_last_year": _stats(_window(honest, _SPLIT, _END).trades),
+            "held_out_last_year": (None if _MARKET.sealed
+                                   else _stats(_window(honest, _SPLIT, _END).trades)),
             "long": _stats(t[t["side"] == "long"]),
             "short": _stats(t[t["side"] == "short"]),
             "risk_pct_quantiles": {str(q): round(float(closed["risk_pct"].quantile(q)), 4)
                                    for q in (0.1, 0.25, 0.5, 0.75, 0.9)},
             "share_costs_exceed_1r": round(float((closed["risk_pct"] < cost_pct).mean()), 4),
         }
-        if anchor == "ny_open":
+        if _MARKET.sealed:
+            # Costs are a price amount here, not a fixed percentage.
+            paid = closed["gross_pct"] - closed["net_pct"]
+            extra["share_costs_exceed_1r"] = round(float((closed["risk_pct"] < paid).mean()), 4)
+            extra["median_cost_r"] = round(float((paid / closed["risk_pct"]).median()), 3)
+        if anchor == "ny_open" and not _MARKET.sealed:
             wd = t["session"].dt.dayofweek
             extra["weekdays"] = _stats(t[wd < 5])
             extra["weekends"] = _stats(t[wd >= 5])
 
         print("  честная версия, разрезы:")
         print(_line("2023-09..2025-09 (IS)", extra["in_sample"]))
-        print(_line("последний год (OOS)", extra["held_out_last_year"]))
+        if not _MARKET.sealed:
+            print(_line("последний год (OOS)", extra["held_out_last_year"]))
         print(_line("лонг", extra["long"]))
         print(_line("шорт", extra["short"]))
-        if anchor == "ny_open":
+        if anchor == "ny_open" and not _MARKET.sealed:
             print(_line("будни", extra["weekdays"]))
             print(_line("выходные", extra["weekends"]))
         print(f"  риск до стопа, % цены: {extra['risk_pct_quantiles']}")
-        print(f"  доля сделок, где издержки {cost_pct:.2f}% больше 1R: "
-              f"{extra['share_costs_exceed_1r']:.1%}\n")
+        print(f"  доля сделок, где издержки больше 1R: {extra['share_costs_exceed_1r']:.1%}"
+              + (f"; медианные издержки {extra['median_cost_r']:.3f}R" if _MARKET.sealed else "")
+              + "\n")
         out["anchors"][anchor] = {"ablation": rows, "honest": extra}
 
     _OUT.mkdir(parents=True, exist_ok=True)
-    path = _OUT / "orb_3y.json"
+    path = _OUT / ("orb_3y.json" if not _MARKET.sealed else f"{_MARKET.prefix}_is.json")
     path.write_text(json.dumps(out, indent=2, default=str), encoding="utf-8")
     print(f"-> {path}")
     return 0
 
 
 def fractal_sweep() -> int:
-    df = load_history(_START - pd.Timedelta(days=1), _END)
+    df = load_history(_START - pd.Timedelta(days=1), _SPLIT if _MARKET.sealed else _END)
     print(f"5m: {len(df)} баров, {df.index[0]} -> {df.index[-1]}\n")
 
     biases: dict = {"нет": None}
@@ -270,20 +318,23 @@ def fractal_sweep() -> int:
               f"нет {np.mean(live == 0):.0%}")
     print()
 
-    base = {**_HONEST, "cost_bps": _COST_BPS, "anchor": "ny_open"}
+    base = {**_HONEST, **_MARKET.costs, "anchor": "ny_open"}
     arms: dict[str, OrbResult] = {"эталон: центр + Dynamic": simulate(df, OrbParams(**base))}
     for bias_name, bias in biases.items():
         for tp_name, tp in _FRACTAL_TP:
             p = OrbParams(**base, sl_method="Fractal", min_stop_atr=0.5, **tp)
             arms[f"фрактал | {tp_name} | биас {bias_name}"] = simulate(df, p, bias=bias)
 
-    print(f"=== первые два года (IS), якорь NY, издержки {_COST_BPS:g} bps/сторону ===")
-    out: dict = {"start": str(_START), "end": str(_END), "split": str(_SPLIT), "arms": {}}
+    print(f"=== первые два года (IS), якорь NY, издержки {_MARKET.cost_label} ===")
+    out: dict = {"symbol": _MARKET.symbol, "start": str(_START), "end": str(_END),
+                 "split": str(_SPLIT), "arms": {}}
+    # A market shut at the weekend has no weekend sessions to split off.
+    day_cuts = (("все дни", False),) if _MARKET.sealed else (("все дни", False), ("будни", True))
     cells = []
     for name, res in arms.items():
         row: dict = {}
         is_ref = name.startswith("эталон")
-        for label, wd in (("все дни", False), ("будни", True)):
+        for label, wd in day_cuts:
             s = _stats(_cut(res, _START, _SPLIT, wd))
             row[label] = s
             print(_line(f"{name} [{label}]", s))
@@ -307,14 +358,19 @@ def fractal_sweep() -> int:
         name, label, wd, s = max(cells, key=lambda c: c[3]["mean_r_ci"][0])
         print(f"сравнений: {len(cells)} ячеек. Лучшая по нижней границе на IS: "
               f"{name} [{label}]  E {s['mean_r']:+.3f}R {s['mean_r_ci']}")
-        oos = _stats(_cut(arms[name], _SPLIT, _END, wd))
-        print("отложенный последний год — только для неё:")
-        print(_line(f"{name} [{label}] OOS", oos))
-        out["selected"] = {"arm": name, "days": label, "comparisons": len(cells),
-                           "in_sample": s, "held_out_last_year": oos}
+        if _MARKET.sealed:
+            print("отложенный год запечатан и не читался")
+            out["selected"] = {"arm": name, "days": label, "comparisons": len(cells),
+                               "in_sample": s, "held_out_last_year": None}
+        else:
+            oos = _stats(_cut(arms[name], _SPLIT, _END, wd))
+            print("отложенный последний год — только для неё:")
+            print(_line(f"{name} [{label}] OOS", oos))
+            out["selected"] = {"arm": name, "days": label, "comparisons": len(cells),
+                               "in_sample": s, "held_out_last_year": oos}
 
     _OUT.mkdir(parents=True, exist_ok=True)
-    path = _OUT / "orb_fractal_3y.json"
+    path = _OUT / ("orb_fractal_3y.json" if not _MARKET.sealed else f"{_MARKET.prefix}_fractal_is.json")
     path.write_text(json.dumps(out, indent=2, default=str), encoding="utf-8")
     print(f"\n-> {path}")
     return 0
@@ -323,7 +379,12 @@ def fractal_sweep() -> int:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("command", choices=("calibrate", "sweep", "fractal"))
+    ap.add_argument("--symbol", default="BTCUSDT", choices=sorted(_MARKETS))
     args = ap.parse_args()
+    global _MARKET
+    _MARKET = _MARKETS[args.symbol]
+    if args.command == "calibrate" and _MARKET.symbol != "BTCUSDT":
+        ap.error("calibrate reproduces a BTCUSDT.P screenshot; there is none for this symbol")
     if args.command == "calibrate":
         return calibrate()
     if args.command == "sweep":

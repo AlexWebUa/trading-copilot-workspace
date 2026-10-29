@@ -1,0 +1,46 @@
+{
+  "symbol": "XAUUSD",
+  "bars": 5000,
+  "start": "2023-09-14T00:00:00Z",
+  "end": "2025-09-14T00:00:00Z",
+  "fee_bps": 0.4,
+  "slippage_bps": 0.2,
+  "arms": {
+    "sb_nypm_test_long": {
+      "signals": 5958,
+      "trades": 21,
+      "wins": 8,
+      "losses": 13,
+      "winrate": 0.381,
+      "unfinished": 0,
+      "expectancy": -0.121,
+      "expectancy_ci": [
+        -0.618,
+        0.421
+      ],
+      "profit_factor": 0.82,
+      "skipped_rr": 13,
+      "start": "2023-09-14T12:30:00Z",
+      "end": "2025-09-12T20:45:00Z",
+      "seconds": 2998.2
+    },
+    "sb_nypm_test_short": {
+      "signals": 6113,
+      "trades": 30,
+      "wins": 12,
+      "losses": 17,
+      "winrate": 0.4138,
+      "unfinished": 1,
+      "expectancy": 0.283,
+      "expectancy_ci": [
+        -0.344,
+        0.993
+      ],
+      "profit_factor": 1.433,
+      "skipped_rr": 6,
+      "start": "2023-09-14T12:30:00Z",
+      "end": "2025-09-12T20:45:00Z",
+      "seconds": 3247.8
+    }
+  }
+}

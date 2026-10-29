@@ -107,8 +107,14 @@ class DukascopySource:
 
     source_id = "dukascopy"
 
-    def __init__(self, store: BatchedOHLCStore | None = None):
+    def __init__(self, store: BatchedOHLCStore | None = None,
+                 until: pd.Timestamp | None = None):
+        """`until` is a ceiling: no bar opening at or after it is ever returned,
+        whatever is asked for. It is how a held-out year stays unread by code
+        that sizes its own requests — the backtest engine asks for "the last N
+        bars" and would otherwise load right up to the end of the download."""
         self._store = store or BatchedOHLCStore()
+        self._until = until
         self._m1: dict[tuple[str, str], pd.DataFrame] = {}
 
     def _minutes(self, symbol: str, side: str) -> pd.DataFrame:
@@ -119,7 +125,8 @@ class DukascopySource:
                 raise FileNotFoundError(
                     f"no Dukascopy {side} history for {key[0]}: run "
                     f"scripts/fetch_dukascopy.py --instrument {key[0].lower()}")
-            self._m1[key] = loaded[0]
+            m1 = loaded[0]
+            self._m1[key] = m1 if self._until is None else m1[m1.index < self._until]
         return self._m1[key]
 
     def supports(self, symbol: str) -> bool:
@@ -136,9 +143,16 @@ class DukascopySource:
             m1 = m1[m1.index < end]
         return resample(m1, tf)
 
-    def get_ohlc(self, symbol: str, tf: str, bars: int = 500) -> pd.DataFrame:
-        """The last `bars` bars of the stored history. Every one of them has
-        closed: the data is a past download, not a live feed."""
+    def get_ohlc(self, symbol: str, tf: str, bars: int = 500,
+                 start_time: str | None = None, end_time: str | None = None) -> pd.DataFrame:
+        """The last `bars` bars of the stored history, or — given `start_time`
+        and `end_time` — the bars opening in that range, as the Binance source
+        answers a range request. Every bar has closed: the data is a past
+        download, not a live feed."""
+        if start_time is not None or end_time is not None:
+            start = pd.Timestamp(start_time) if start_time is not None else None
+            end = pd.Timestamp(end_time) if end_time is not None else None
+            return self.history(symbol, tf, start, end)
         m1 = self._minutes(symbol, "bid")
         # Generous cut before resampling: the market is open about 23 of 24 hours
         # on about 5 of 7 days, so 2x the nominal span always covers `bars`.
