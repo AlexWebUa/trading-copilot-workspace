@@ -11,7 +11,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 DEFAULT_SYMBOL = "BTCUSDT"
-DEFAULT_MODEL = "claude-opus-5"
+DEFAULT_MODEL = "claude-opus-5-5"
 DEFAULT_TFS = ["1d", "4h", "1h", "15m", "3m"]
 DEFAULT_BACKEND = "api"  # "api" = Messages API billing, "cli" = subscription plan
 DEFAULT_MARKET = "futures"  # "futures" = fapi perpetuals, "spot" = api.binance.com
