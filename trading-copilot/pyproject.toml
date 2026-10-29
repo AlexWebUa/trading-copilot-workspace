@@ -22,7 +22,9 @@ dependencies = [
     # using pytz, which bundles its own database.)
     "tzdata>=2024.1; sys_platform == 'win32'",
     "smartmoneyconcepts>=0.0.26",
-    "mcp>=1.0.0",
+    # copilot/mcp_server.py uses the 1.x decorator API (@server.list_tools());
+    # 2.x removed it and the server dies on import.
+    "mcp>=1.0.0,<2",
 ]
 
 [project.optional-dependencies]

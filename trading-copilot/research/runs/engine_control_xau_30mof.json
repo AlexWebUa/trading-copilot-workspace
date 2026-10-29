@@ -1,0 +1,633 @@
+{
+ "symbol": "XAUUSD",
+ "tf": "30m",
+ "window": "2023-09-14 .. 2025-09-14",
+ "cost_bps_per_side": 0.6000000000000001,
+ "hours_ny": null,
+ "arms": {
+  "of30_bpr_long": {
+   "n": 5,
+   "side": "long",
+   "mean_r": -1.087,
+   "mean_r_ci": [
+    -1.168,
+    -1.036
+   ],
+   "median_risk_pct": 0.2778,
+   "control": {
+    "n": 2994,
+    "gross_r": 0.283,
+    "net_r": 0.196,
+    "excess_r": -1.283,
+    "excess_r_ci": [
+     -1.409,
+     -1.169
+    ]
+   },
+   "excess_r": -1.283,
+   "excess_r_ci": [
+    -1.409,
+    -1.169
+   ],
+   "verdict_control": "мало сделок"
+  },
+  "of30_bpr_short": {
+   "n": 1,
+   "side": "short",
+   "mean_r": 2.601,
+   "mean_r_ci": [
+    2.601,
+    2.601
+   ],
+   "median_risk_pct": 0.0669,
+   "control": {
+    "n": 3000,
+    "gross_r": -0.134,
+    "net_r": -0.314,
+    "excess_r": 2.914,
+    "excess_r_ci": [
+     2.857,
+     2.971
+    ]
+   },
+   "excess_r": 2.914,
+   "excess_r_ci": [
+    2.857,
+    2.971
+   ],
+   "verdict_control": "мало сделок"
+  },
+  "of30_fvg_full_long": {
+   "n": 30,
+   "side": "long",
+   "mean_r": 0.363,
+   "mean_r_ci": [
+    -0.451,
+    1.315
+   ],
+   "median_risk_pct": 0.1434,
+   "control": {
+    "n": 2998,
+    "gross_r": 0.277,
+    "net_r": 0.172,
+    "excess_r": 0.191,
+    "excess_r_ci": [
+     -0.652,
+     1.088
+    ]
+   },
+   "excess_r": 0.191,
+   "excess_r_ci": [
+    -0.652,
+    1.088
+   ],
+   "verdict_control": "неотличима от случайного"
+  },
+  "of30_fvg_full_short": {
+   "n": 19,
+   "side": "short",
+   "mean_r": 0.234,
+   "mean_r_ci": [
+    -0.63,
+    1.172
+   ],
+   "median_risk_pct": 0.1351,
+   "control": {
+    "n": 2998,
+    "gross_r": -0.163,
+    "net_r": -0.285,
+    "excess_r": 0.518,
+    "excess_r_ci": [
+     -0.332,
+     1.511
+    ]
+   },
+   "excess_r": 0.518,
+   "excess_r_ci": [
+    -0.332,
+    1.511
+   ],
+   "verdict_control": "мало сделок"
+  },
+  "of30_fvg_long": {
+   "n": 50,
+   "side": "long",
+   "mean_r": -0.249,
+   "mean_r_ci": [
+    -0.745,
+    0.302
+   ],
+   "median_risk_pct": 0.0938,
+   "control": {
+    "n": 2995,
+    "gross_r": 0.203,
+    "net_r": 0.074,
+    "excess_r": -0.323,
+    "excess_r_ci": [
+     -0.797,
+     0.216
+    ]
+   },
+   "excess_r": -0.323,
+   "excess_r_ci": [
+    -0.797,
+    0.216
+   ],
+   "verdict_control": "неотличима от случайного"
+  },
+  "of30_fvg_short": {
+   "n": 37,
+   "side": "short",
+   "mean_r": 0.313,
+   "mean_r_ci": [
+    -0.489,
+    1.278
+   ],
+   "median_risk_pct": 0.0878,
+   "control": {
+    "n": 3028,
+    "gross_r": -0.183,
+    "net_r": -0.318,
+    "excess_r": 0.631,
+    "excess_r_ci": [
+     -0.118,
+     1.566
+    ]
+   },
+   "excess_r": 0.631,
+   "excess_r_ci": [
+    -0.118,
+    1.566
+   ],
+   "verdict_control": "неотличима от случайного"
+  },
+  "of30_market_long": {
+   "n": 132,
+   "side": "long",
+   "mean_r": 0.074,
+   "mean_r_ci": [
+    -0.209,
+    0.38
+   ],
+   "median_risk_pct": 0.2268,
+   "control": {
+    "n": 3029,
+    "gross_r": 0.231,
+    "net_r": 0.161,
+    "excess_r": -0.086,
+    "excess_r_ci": [
+     -0.384,
+     0.223
+    ]
+   },
+   "excess_r": -0.086,
+   "excess_r_ci": [
+    -0.384,
+    0.223
+   ],
+   "verdict_control": "неотличима от случайного"
+  },
+  "of30_market_short": {
+   "n": 62,
+   "side": "short",
+   "mean_r": -0.302,
+   "mean_r_ci": [
+    -0.638,
+    0.04
+   ],
+   "median_risk_pct": 0.2693,
+   "control": {
+    "n": 3029,
+    "gross_r": -0.231,
+    "net_r": -0.285,
+    "excess_r": -0.017,
+    "excess_r_ci": [
+     -0.36,
+     0.339
+    ]
+   },
+   "excess_r": -0.017,
+   "excess_r_ci": [
+    -0.36,
+    0.339
+   ],
+   "verdict_control": "неотличима от случайного"
+  },
+  "of30_ob_long": {
+   "n": 33,
+   "side": "long",
+   "mean_r": 0.085,
+   "mean_r_ci": [
+    -0.793,
+    1.307
+   ],
+   "median_risk_pct": 0.1252,
+   "control": {
+    "n": 3001,
+    "gross_r": 0.208,
+    "net_r": 0.1,
+    "excess_r": -0.016,
+    "excess_r_ci": [
+     -0.902,
+     1.149
+    ]
+   },
+   "excess_r": -0.016,
+   "excess_r_ci": [
+    -0.902,
+    1.149
+   ],
+   "verdict_control": "неотличима от случайного"
+  },
+  "of30_ob_short": {
+   "n": 28,
+   "side": "short",
+   "mean_r": -0.14,
+   "mean_r_ci": [
+    -0.777,
+    0.629
+   ],
+   "median_risk_pct": 0.1202,
+   "control": {
+    "n": 3019,
+    "gross_r": -0.211,
+    "net_r": -0.319,
+    "excess_r": 0.179,
+    "excess_r_ci": [
+     -0.496,
+     0.913
+    ]
+   },
+   "excess_r": 0.179,
+   "excess_r_ci": [
+    -0.496,
+    0.913
+   ],
+   "verdict_control": "мало сделок"
+  },
+  "of30_poi_long": {
+   "n": 52,
+   "side": "long",
+   "mean_r": -0.076,
+   "mean_r_ci": [
+    -0.593,
+    0.513
+   ],
+   "median_risk_pct": 0.1306,
+   "control": {
+    "n": 3013,
+    "gross_r": 0.254,
+    "net_r": 0.144,
+    "excess_r": -0.22,
+    "excess_r_ci": [
+     -0.771,
+     0.375
+    ]
+   },
+   "excess_r": -0.22,
+   "excess_r_ci": [
+    -0.771,
+    0.375
+   ],
+   "verdict_control": "неотличима от случайного"
+  },
+  "of30_poi_short": {
+   "n": 46,
+   "side": "short",
+   "mean_r": 0.305,
+   "mean_r_ci": [
+    -0.252,
+    0.962
+   ],
+   "median_risk_pct": 0.1551,
+   "control": {
+    "n": 3031,
+    "gross_r": -0.247,
+    "net_r": -0.339,
+    "excess_r": 0.644,
+    "excess_r_ci": [
+     0.1,
+     1.277
+    ]
+   },
+   "excess_r": 0.644,
+   "excess_r_ci": [
+    0.1,
+    1.277
+   ],
+   "verdict_control": "ЭДЖ"
+  },
+  "of30_stb_long": {
+   "n": 13,
+   "side": "long",
+   "mean_r": 0.258,
+   "mean_r_ci": [
+    -0.581,
+    1.254
+   ],
+   "median_risk_pct": 0.3762,
+   "control": {
+    "n": 2996,
+    "gross_r": 0.311,
+    "net_r": 0.267,
+    "excess_r": -0.009,
+    "excess_r_ci": [
+     -0.835,
+     0.941
+    ]
+   },
+   "excess_r": -0.009,
+   "excess_r_ci": [
+    -0.835,
+    0.941
+   ],
+   "verdict_control": "мало сделок"
+  },
+  "of30_stb_short": {
+   "n": 12,
+   "side": "short",
+   "mean_r": 0.012,
+   "mean_r_ci": [
+    -0.795,
+    0.888
+   ],
+   "median_risk_pct": 0.3958,
+   "control": {
+    "n": 2985,
+    "gross_r": -0.24,
+    "net_r": -0.273,
+    "excess_r": 0.285,
+    "excess_r_ci": [
+     -0.509,
+     1.168
+    ]
+   },
+   "excess_r": 0.285,
+   "excess_r_ci": [
+    -0.509,
+    1.168
+   ],
+   "verdict_control": "мало сделок"
+  },
+  "of30_bpr_full_long": {
+   "n": 4,
+   "side": "long",
+   "mean_r": -1.104,
+   "mean_r_ci": [
+    -1.194,
+    -1.039
+   ],
+   "median_risk_pct": 0.2016,
+   "control": {
+    "n": 2996,
+    "gross_r": 0.256,
+    "net_r": 0.152,
+    "excess_r": -1.256,
+    "excess_r_ci": [
+     -1.383,
+     -1.131
+    ]
+   },
+   "excess_r": -1.256,
+   "excess_r_ci": [
+    -1.383,
+    -1.131
+   ],
+   "verdict_control": "мало сделок"
+  },
+  "of30_bpr_full_short": {
+   "n": 1,
+   "side": "short",
+   "mean_r": 2.801,
+   "mean_r_ci": [
+    2.801,
+    2.801
+   ],
+   "median_risk_pct": 0.0669,
+   "control": {
+    "n": 3000,
+    "gross_r": -0.144,
+    "net_r": -0.323,
+    "excess_r": 3.124,
+    "excess_r_ci": [
+     3.066,
+     3.183
+    ]
+   },
+   "excess_r": 3.124,
+   "excess_r_ci": [
+    3.066,
+    3.183
+   ],
+   "verdict_control": "мало сделок"
+  },
+  "of30_ob_full_long": {
+   "n": 22,
+   "side": "long",
+   "mean_r": 0.267,
+   "mean_r_ci": [
+    -0.954,
+    1.815
+   ],
+   "median_risk_pct": 0.0615,
+   "control": {
+    "n": 3011,
+    "gross_r": 0.314,
+    "net_r": 0.11,
+    "excess_r": 0.157,
+    "excess_r_ci": [
+     -1.058,
+     1.757
+    ]
+   },
+   "excess_r": 0.157,
+   "excess_r_ci": [
+    -1.058,
+    1.757
+   ],
+   "verdict_control": "мало сделок"
+  },
+  "of30_ob_full_short": {
+   "n": 14,
+   "side": "short",
+   "mean_r": -0.397,
+   "mean_r_ci": [
+    -1.218,
+    0.782
+   ],
+   "median_risk_pct": 0.0717,
+   "control": {
+    "n": 3007,
+    "gross_r": -0.126,
+    "net_r": -0.311,
+    "excess_r": -0.085,
+    "excess_r_ci": [
+     -0.93,
+     1.073
+    ]
+   },
+   "excess_r": -0.085,
+   "excess_r_ci": [
+    -0.93,
+    1.073
+   ],
+   "verdict_control": "мало сделок"
+  },
+  "of30_poi_full_long": {
+   "n": 46,
+   "side": "long",
+   "mean_r": 0.538,
+   "mean_r_ci": [
+    -0.264,
+    1.469
+   ],
+   "median_risk_pct": 0.0939,
+   "control": {
+    "n": 3034,
+    "gross_r": 0.203,
+    "net_r": 0.064,
+    "excess_r": 0.474,
+    "excess_r_ci": [
+     -0.369,
+     1.444
+    ]
+   },
+   "excess_r": 0.474,
+   "excess_r_ci": [
+    -0.369,
+    1.444
+   ],
+   "verdict_control": "неотличима от случайного"
+  },
+  "of30_poi_full_short": {
+   "n": 28,
+   "side": "short",
+   "mean_r": -0.521,
+   "mean_r_ci": [
+    -1.041,
+    0.13
+   ],
+   "median_risk_pct": 0.088,
+   "control": {
+    "n": 3020,
+    "gross_r": -0.215,
+    "net_r": -0.365,
+    "excess_r": -0.156,
+    "excess_r_ci": [
+     -0.705,
+     0.51
+    ]
+   },
+   "excess_r": -0.156,
+   "excess_r_ci": [
+    -0.705,
+    0.51
+   ],
+   "verdict_control": "мало сделок"
+  },
+  "of30_stb_full_long": {
+   "n": 59,
+   "side": "long",
+   "mean_r": 0.123,
+   "mean_r_ci": [
+    -0.394,
+    0.701
+   ],
+   "median_risk_pct": 0.0846,
+   "control": {
+    "n": 3007,
+    "gross_r": 0.142,
+    "net_r": 0.003,
+    "excess_r": 0.12,
+    "excess_r_ci": [
+     -0.415,
+     0.677
+    ]
+   },
+   "excess_r": 0.12,
+   "excess_r_ci": [
+    -0.415,
+    0.677
+   ],
+   "verdict_control": "неотличима от случайного"
+  },
+  "of30_stb_full_short": {
+   "n": 17,
+   "side": "short",
+   "mean_r": -0.566,
+   "mean_r_ci": [
+    -1.18,
+    0.299
+   ],
+   "median_risk_pct": 0.0887,
+   "control": {
+    "n": 3007,
+    "gross_r": -0.194,
+    "net_r": -0.352,
+    "excess_r": -0.214,
+    "excess_r_ci": [
+     -0.841,
+     0.693
+    ]
+   },
+   "excess_r": -0.214,
+   "excess_r_ci": [
+    -0.841,
+    0.693
+   ],
+   "verdict_control": "мало сделок"
+  },
+  "of30_market_long_rr": {
+   "n": 195,
+   "side": "long",
+   "mean_r": 0.044,
+   "mean_r_ci": [
+    -0.143,
+    0.232
+   ],
+   "median_risk_pct": 0.4153,
+   "control": {
+    "n": 3108,
+    "gross_r": 0.272,
+    "net_r": 0.24,
+    "excess_r": -0.195,
+    "excess_r_ci": [
+     -0.4,
+     0.01
+    ]
+   },
+   "excess_r": -0.195,
+   "excess_r_ci": [
+    -0.4,
+    0.01
+   ],
+   "verdict_control": "неотличима от случайного"
+  },
+  "of30_market_short_rr": {
+   "n": 113,
+   "side": "short",
+   "mean_r": -0.191,
+   "mean_r_ci": [
+    -0.418,
+    0.055
+   ],
+   "median_risk_pct": 0.4238,
+   "control": {
+    "n": 3034,
+    "gross_r": -0.244,
+    "net_r": -0.278,
+    "excess_r": 0.087,
+    "excess_r_ci": [
+     -0.147,
+     0.344
+    ]
+   },
+   "excess_r": 0.087,
+   "excess_r_ci": [
+    -0.147,
+    0.344
+   ],
+   "verdict_control": "неотличима от случайного"
+  }
+ }
+}

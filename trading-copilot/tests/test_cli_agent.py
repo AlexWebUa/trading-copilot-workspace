@@ -9,6 +9,8 @@ the state snapshot.
 """
 
 import json
+import subprocess
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -226,9 +228,13 @@ def test_follow_up_resumes_the_cli_session(mock_load, mock_report, mock_state):
 @patch("copilot.llm.cli_agent.load_state", return_value=None)
 def test_argv_carries_mcp_config_and_denies_coding_tools(mock_load):
     captured: list[list[str]] = []
+    systems: list[str] = []
 
     def runner(argv):
         captured.append(argv)
+        # The prompt file only lives for the duration of the run.
+        system_file = Path(argv[argv.index("--system-prompt-file") + 1])
+        systems.append(system_file.read_text(encoding="utf-8"))
         return _stream(_init(), _result("ok"))
 
     with patch("copilot.llm.cli_agent.save_report", return_value="/tmp/r.md"):
@@ -249,9 +255,30 @@ def test_argv_carries_mcp_config_and_denies_coding_tools(mock_load):
     # ToolSearch loads the deferred MCP schemas — denying it would hide the detectors
     assert "ToolSearch" not in denied
 
-    system = argv[argv.index("--system-prompt") + 1]
+    system = systems[0]
     assert "trading co-pilot" in system.lower()
     assert TOOL_PREFIX in system  # bare-name → prefixed-name bridge
+
+
+@patch("copilot.llm.cli_agent.load_state", return_value=None)
+def test_system_prompt_travels_by_file_not_argv(mock_load):
+    """The KB-injected system prompt is ~90k characters; Windows caps a command
+    line at 32,767 and rejects the spawn with WinError 206, which surfaces as
+    "`claude` not found". The prompt must reach the CLI through a file."""
+    captured: list[list[str]] = []
+
+    def runner(argv):
+        captured.append(argv)
+        return _stream(_init(), _result("ok"))
+
+    with patch("copilot.llm.cli_agent.save_report", return_value="/tmp/r.md"):
+        ClaudeCLIAgent("BTCUSDT", runner=runner).analyze("go")
+
+    argv = captured[0]
+    assert "--system-prompt" not in argv
+    assert len(subprocess.list2cmdline(argv)) < 32767
+    # Removed once the run is over — no prompt copies pile up in the temp dir.
+    assert not Path(argv[argv.index("--system-prompt-file") + 1]).exists()
 
 
 def test_api_key_is_stripped_from_subprocess_env():

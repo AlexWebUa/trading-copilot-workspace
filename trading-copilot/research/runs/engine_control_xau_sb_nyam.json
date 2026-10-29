@@ -1,0 +1,45 @@
+{
+ "symbol": "XAUUSD",
+ "tf": "3m",
+ "window": "2023-09-14 .. 2025-09-14",
+ "cost_bps_per_side": 0.6000000000000001,
+ "hours_ny": "10,11",
+ "arms": {
+  "sb_nyam_mkt_long": {
+   "n": 71,
+   "side": "long",
+   "mean_r": 0.121,
+   "mean_r_ci": [
+    -0.221,
+    0.449
+   ],
+   "median_risk_pct": 0.2416,
+   "control": {
+    "n": 3051,
+    "gross_r": 0.209,
+    "net_r": 0.147,
+    "excess_r": -0.026,
+    "excess_r_ci": [
+     -0.359,
+     0.318
+    ]
+   },
+   "control_same_hours": {
+    "n": 3052,
+    "gross_r": 0.155,
+    "net_r": 0.094,
+    "excess_r": 0.027,
+    "excess_r_ci": [
+     -0.314,
+     0.368
+    ]
+   },
+   "excess_r": -0.026,
+   "excess_r_ci": [
+    -0.359,
+    0.318
+   ],
+   "verdict_control": "неотличима от случайного"
+  }
+ }
+}

@@ -30,7 +30,7 @@ from copilot.llm.tools import ToolRegistry
 from copilot.llm.trace import write_trace
 
 MAX_TURNS = 12
-DEFAULT_MODEL = "claude-opus-5"
+DEFAULT_MODEL = "claude-opus-5-5"
 
 
 class AgentLoopBudgetExceeded(RuntimeError):

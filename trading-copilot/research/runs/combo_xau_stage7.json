@@ -1,0 +1,2051 @@
+{
+ "symbol": "XAUUSD",
+ "stage": "7",
+ "window": "2023-09-14 .. 2025-09-14 (IS)",
+ "costs": "спред 0.20, комиссия 0.10 за круг",
+ "arms": [
+  {
+   "name": "b1_30m_long__ce",
+   "tf": "30m",
+   "side": "long",
+   "htf": null,
+   "quoted_spread": {
+    "n": 179,
+    "mean_r": 0.287,
+    "mean_r_ci": [
+     0.075,
+     0.508
+    ],
+    "median_spread_r": 0.062
+   },
+   "window": "IS",
+   "params": {
+    "chain": "B1",
+    "side": "long",
+    "pool": "fractal",
+    "fractal_k": 2,
+    "day_start": "ny17",
+    "sweep_tol_atr": 0.15,
+    "fvg_min_atr": 0.1,
+    "entry": "ce",
+    "tp_r": 2.0,
+    "target": "rr",
+    "min_rr": 1.8,
+    "fill_hours_ny": null,
+    "max_wait_bars": 20,
+    "link_bars": 20,
+    "ob_swing_k": 5,
+    "min_stop_atr": 0.5,
+    "cost_bps": 0.0,
+    "cost_abs": 0.1,
+    "spread": 0.2
+   },
+   "funnel_whole_frame": {
+    "no_zone": 321,
+    "zone_spent": 58,
+    "setups": 404,
+    "skipped_in_position": 34,
+    "replaced": 4,
+    "expired": 38,
+    "ran_away": 103,
+    "gapped_through_stop": 0,
+    "outside_window": 0,
+    "filled": 225,
+    "unfinished": 0
+   },
+   "stats": {
+    "n": 184,
+    "unfinished": 0,
+    "per_month": 7.7,
+    "winrate": 0.4565,
+    "mean_r": 0.35,
+    "mean_r_ci": [
+     0.133,
+     0.566
+    ],
+    "pf": 1.629,
+    "gross_r": 0.368,
+    "gross_r_ci": [
+     0.15,
+     0.584
+    ],
+    "median_risk_pct": 0.2604,
+    "median_risk_atr": 1.473,
+    "median_cost_r": 0.044,
+    "floor_share": 0.0054,
+    "excess_r": 0.22,
+    "excess_r_ci": [
+     0.0,
+     0.428
+    ]
+   },
+   "verdict": "ЭДЖ на IS",
+   "verdict_control": "неотличима от случайного",
+   "by_session": {
+    "asia": {
+     "n": 61,
+     "mean_r": 0.503,
+     "mean_r_ci": [
+      0.111,
+      0.896
+     ]
+    },
+    "london": {
+     "n": 23,
+     "mean_r": 0.287,
+     "mean_r_ci": null
+    },
+    "london_open": {
+     "n": 24,
+     "mean_r": 0.603,
+     "mean_r_ci": null
+    },
+    "ny_am": {
+     "n": 23,
+     "mean_r": 0.03,
+     "mean_r_ci": null
+    },
+    "ny_pm": {
+     "n": 21,
+     "mean_r": -0.043,
+     "mean_r_ci": null
+    },
+    "off_hours": {
+     "n": 32,
+     "mean_r": 0.402,
+     "mean_r_ci": [
+      -0.159,
+      0.892
+     ]
+    }
+   },
+   "by_flow": {
+    "по потоку": {
+     "n": 184,
+     "mean_r": 0.35,
+     "mean_r_ci": [
+      0.133,
+      0.566
+     ]
+    }
+   },
+   "control": {
+    "n": 3120,
+    "gross_r": 0.147,
+    "net_r": 0.13
+   },
+   "seconds": 0.3
+  },
+  {
+   "name": "b1_30m_long__tp15",
+   "tf": "30m",
+   "side": "long",
+   "htf": null,
+   "quoted_spread": {
+    "n": 200,
+    "mean_r": 0.183,
+    "mean_r_ci": [
+     0.022,
+     0.352
+    ],
+    "median_spread_r": 0.05
+   },
+   "window": "IS",
+   "params": {
+    "chain": "B1",
+    "side": "long",
+    "pool": "fractal",
+    "fractal_k": 2,
+    "day_start": "ny17",
+    "sweep_tol_atr": 0.15,
+    "fvg_min_atr": 0.1,
+    "entry": "near",
+    "tp_r": 1.5,
+    "target": "rr",
+    "min_rr": 1.8,
+    "fill_hours_ny": null,
+    "max_wait_bars": 20,
+    "link_bars": 20,
+    "ob_swing_k": 5,
+    "min_stop_atr": 0.5,
+    "cost_bps": 0.0,
+    "cost_abs": 0.1,
+    "spread": 0.2
+   },
+   "funnel_whole_frame": {
+    "no_zone": 321,
+    "zone_spent": 58,
+    "setups": 404,
+    "skipped_in_position": 42,
+    "replaced": 4,
+    "expired": 25,
+    "ran_away": 83,
+    "gapped_through_stop": 0,
+    "outside_window": 0,
+    "filled": 250,
+    "unfinished": 0
+   },
+   "stats": {
+    "n": 205,
+    "unfinished": 0,
+    "per_month": 8.5,
+    "winrate": 0.4878,
+    "mean_r": 0.202,
+    "mean_r_ci": [
+     0.033,
+     0.382
+    ],
+    "pf": 1.387,
+    "gross_r": 0.217,
+    "gross_r_ci": [
+     0.049,
+     0.397
+    ],
+    "median_risk_pct": 0.3144,
+    "median_risk_atr": 1.756,
+    "median_cost_r": 0.036,
+    "floor_share": 0.0,
+    "excess_r": 0.049,
+    "excess_r_ci": [
+     -0.131,
+     0.224
+    ]
+   },
+   "verdict": "ЭДЖ на IS",
+   "verdict_control": "неотличима от случайного",
+   "by_session": {
+    "asia": {
+     "n": 73,
+     "mean_r": 0.319,
+     "mean_r_ci": [
+      0.043,
+      0.626
+     ]
+    },
+    "london": {
+     "n": 25,
+     "mean_r": 0.087,
+     "mean_r_ci": null
+    },
+    "london_open": {
+     "n": 28,
+     "mean_r": 0.411,
+     "mean_r_ci": null
+    },
+    "ny_am": {
+     "n": 18,
+     "mean_r": -0.178,
+     "mean_r_ci": null
+    },
+    "ny_pm": {
+     "n": 24,
+     "mean_r": -0.094,
+     "mean_r_ci": null
+    },
+    "off_hours": {
+     "n": 37,
+     "mean_r": 0.27,
+     "mean_r_ci": [
+      -0.134,
+      0.675
+     ]
+    }
+   },
+   "by_flow": {
+    "по потоку": {
+     "n": 205,
+     "mean_r": 0.202,
+     "mean_r_ci": [
+      0.033,
+      0.382
+     ]
+    }
+   },
+   "control": {
+    "n": 3067,
+    "gross_r": 0.168,
+    "net_r": 0.154
+   },
+   "seconds": 0.3
+  },
+  {
+   "name": "b1_30m_long__tp30",
+   "tf": "30m",
+   "side": "long",
+   "htf": null,
+   "quoted_spread": {
+    "n": 189,
+    "mean_r": 0.294,
+    "mean_r_ci": [
+     0.03,
+     0.572
+    ],
+    "median_spread_r": 0.052
+   },
+   "window": "IS",
+   "params": {
+    "chain": "B1",
+    "side": "long",
+    "pool": "fractal",
+    "fractal_k": 2,
+    "day_start": "ny17",
+    "sweep_tol_atr": 0.15,
+    "fvg_min_atr": 0.1,
+    "entry": "near",
+    "tp_r": 3.0,
+    "target": "rr",
+    "min_rr": 1.8,
+    "fill_hours_ny": null,
+    "max_wait_bars": 20,
+    "link_bars": 20,
+    "ob_swing_k": 5,
+    "min_stop_atr": 0.5,
+    "cost_bps": 0.0,
+    "cost_abs": 0.1,
+    "spread": 0.2
+   },
+   "funnel_whole_frame": {
+    "no_zone": 321,
+    "zone_spent": 58,
+    "setups": 404,
+    "skipped_in_position": 92,
+    "replaced": 3,
+    "expired": 46,
+    "ran_away": 29,
+    "gapped_through_stop": 0,
+    "outside_window": 0,
+    "filled": 234,
+    "unfinished": 0
+   },
+   "stats": {
+    "n": 190,
+    "unfinished": 0,
+    "per_month": 7.9,
+    "winrate": 0.3316,
+    "mean_r": 0.308,
+    "mean_r_ci": [
+     0.046,
+     0.585
+    ],
+    "pf": 1.452,
+    "gross_r": 0.323,
+    "gross_r_ci": [
+     0.062,
+     0.6
+    ],
+    "median_risk_pct": 0.307,
+    "median_risk_atr": 1.722,
+    "median_cost_r": 0.038,
+    "floor_share": 0.0,
+    "excess_r": 0.013,
+    "excess_r_ci": [
+     -0.254,
+     0.282
+    ]
+   },
+   "verdict": "ЭДЖ на IS",
+   "verdict_control": "неотличима от случайного",
+   "by_session": {
+    "asia": {
+     "n": 63,
+     "mean_r": 0.506,
+     "mean_r_ci": [
+      0.06,
+      0.954
+     ]
+    },
+    "london": {
+     "n": 23,
+     "mean_r": 0.551,
+     "mean_r_ci": null
+    },
+    "london_open": {
+     "n": 29,
+     "mean_r": 0.499,
+     "mean_r_ci": null
+    },
+    "ny_am": {
+     "n": 22,
+     "mean_r": -0.287,
+     "mean_r_ci": null
+    },
+    "ny_pm": {
+     "n": 21,
+     "mean_r": -0.464,
+     "mean_r_ci": null
+    },
+    "off_hours": {
+     "n": 32,
+     "mean_r": 0.486,
+     "mean_r_ci": [
+      -0.139,
+      1.235
+     ]
+    }
+   },
+   "by_flow": {
+    "по потоку": {
+     "n": 190,
+     "mean_r": 0.308,
+     "mean_r_ci": [
+      0.046,
+      0.585
+     ]
+    }
+   },
+   "control": {
+    "n": 3032,
+    "gross_r": 0.31,
+    "net_r": 0.295
+   },
+   "seconds": 0.3
+  },
+  {
+   "name": "b3_1h_long__ce",
+   "tf": "1h",
+   "side": "long",
+   "htf": null,
+   "quoted_spread": {
+    "n": 96,
+    "mean_r": 0.295,
+    "mean_r_ci": [
+     0.006,
+     0.608
+    ],
+    "median_spread_r": 0.044
+   },
+   "window": "IS",
+   "params": {
+    "chain": "B3",
+    "side": "long",
+    "pool": "fractal",
+    "fractal_k": 2,
+    "day_start": "ny17",
+    "sweep_tol_atr": 0.15,
+    "fvg_min_atr": 0.1,
+    "entry": "ce",
+    "tp_r": 2.0,
+    "target": "rr",
+    "min_rr": 1.8,
+    "fill_hours_ny": null,
+    "max_wait_bars": 20,
+    "link_bars": 20,
+    "ob_swing_k": 5,
+    "min_stop_atr": 0.5,
+    "cost_bps": 0.0,
+    "cost_abs": 0.1,
+    "spread": 0.2
+   },
+   "funnel_whole_frame": {
+    "no_zone": 219,
+    "zone_spent": 27,
+    "setups": 245,
+    "skipped_in_position": 35,
+    "replaced": 22,
+    "expired": 15,
+    "ran_away": 60,
+    "gapped_through_stop": 0,
+    "outside_window": 0,
+    "filled": 113,
+    "unfinished": 0
+   },
+   "stats": {
+    "n": 96,
+    "unfinished": 0,
+    "per_month": 4.0,
+    "winrate": 0.4375,
+    "mean_r": 0.295,
+    "mean_r_ci": [
+     0.006,
+     0.608
+    ],
+    "pf": 1.511,
+    "gross_r": 0.305,
+    "gross_r_ci": [
+     0.017,
+     0.618
+    ],
+    "median_risk_pct": 0.403,
+    "median_risk_atr": 1.673,
+    "median_cost_r": 0.026,
+    "floor_share": 0.0,
+    "excess_r": 0.037,
+    "excess_r_ci": [
+     -0.261,
+     0.341
+    ]
+   },
+   "verdict": "ЭДЖ на IS",
+   "verdict_control": "неотличима от случайного",
+   "by_session": {
+    "asia": {
+     "n": 32,
+     "mean_r": 0.302,
+     "mean_r_ci": [
+      -0.171,
+      0.773
+     ]
+    },
+    "london": {
+     "n": 19,
+     "mean_r": 0.251,
+     "mean_r_ci": null
+    },
+    "london_open": {
+     "n": 14,
+     "mean_r": 0.277,
+     "mean_r_ci": null
+    },
+    "ny_am": {
+     "n": 11,
+     "mean_r": 0.626,
+     "mean_r_ci": null
+    },
+    "ny_pm": {
+     "n": 9,
+     "mean_r": 0.581,
+     "mean_r_ci": null
+    },
+    "off_hours": {
+     "n": 11,
+     "mean_r": -0.193,
+     "mean_r_ci": null
+    }
+   },
+   "by_flow": {
+    "по потоку": {
+     "n": 96,
+     "mean_r": 0.295,
+     "mean_r_ci": [
+      0.006,
+      0.608
+     ]
+    }
+   },
+   "control": {
+    "n": 3058,
+    "gross_r": 0.269,
+    "net_r": 0.257
+   },
+   "seconds": 0.2
+  },
+  {
+   "name": "b3_1h_long__tp15",
+   "tf": "1h",
+   "side": "long",
+   "htf": null,
+   "quoted_spread": {
+    "n": 109,
+    "mean_r": 0.248,
+    "mean_r_ci": [
+     0.023,
+     0.483
+    ],
+    "median_spread_r": 0.036
+   },
+   "window": "IS",
+   "params": {
+    "chain": "B3",
+    "side": "long",
+    "pool": "fractal",
+    "fractal_k": 2,
+    "day_start": "ny17",
+    "sweep_tol_atr": 0.15,
+    "fvg_min_atr": 0.1,
+    "entry": "near",
+    "tp_r": 1.5,
+    "target": "rr",
+    "min_rr": 1.8,
+    "fill_hours_ny": null,
+    "max_wait_bars": 20,
+    "link_bars": 20,
+    "ob_swing_k": 5,
+    "min_stop_atr": 0.5,
+    "cost_bps": 0.0,
+    "cost_abs": 0.1,
+    "spread": 0.2
+   },
+   "funnel_whole_frame": {
+    "no_zone": 219,
+    "zone_spent": 27,
+    "setups": 245,
+    "skipped_in_position": 41,
+    "replaced": 14,
+    "expired": 7,
+    "ran_away": 52,
+    "gapped_through_stop": 0,
+    "outside_window": 0,
+    "filled": 131,
+    "unfinished": 0
+   },
+   "stats": {
+    "n": 112,
+    "unfinished": 0,
+    "per_month": 4.7,
+    "winrate": 0.5179,
+    "mean_r": 0.281,
+    "mean_r_ci": [
+     0.04,
+     0.527
+    ],
+    "pf": 1.573,
+    "gross_r": 0.29,
+    "gross_r_ci": [
+     0.049,
+     0.535
+    ],
+    "median_risk_pct": 0.5087,
+    "median_risk_atr": 1.942,
+    "median_cost_r": 0.023,
+    "floor_share": 0.0,
+    "excess_r": 0.089,
+    "excess_r_ci": [
+     -0.151,
+     0.322
+    ]
+   },
+   "verdict": "ЭДЖ на IS",
+   "verdict_control": "неотличима от случайного",
+   "by_session": {
+    "asia": {
+     "n": 43,
+     "mean_r": 0.271,
+     "mean_r_ci": [
+      -0.078,
+      0.621
+     ]
+    },
+    "london": {
+     "n": 18,
+     "mean_r": 0.24,
+     "mean_r_ci": null
+    },
+    "london_open": {
+     "n": 11,
+     "mean_r": 0.127,
+     "mean_r_ci": null
+    },
+    "ny_am": {
+     "n": 12,
+     "mean_r": 0.45,
+     "mean_r_ci": null
+    },
+    "ny_pm": {
+     "n": 17,
+     "mean_r": 0.43,
+     "mean_r_ci": null
+    },
+    "off_hours": {
+     "n": 11,
+     "mean_r": 0.128,
+     "mean_r_ci": null
+    }
+   },
+   "by_flow": {
+    "по потоку": {
+     "n": 112,
+     "mean_r": 0.281,
+     "mean_r_ci": [
+      0.04,
+      0.527
+     ]
+    }
+   },
+   "control": {
+    "n": 3013,
+    "gross_r": 0.201,
+    "net_r": 0.193
+   },
+   "seconds": 0.2
+  },
+  {
+   "name": "b3_1h_long__tp30",
+   "tf": "1h",
+   "side": "long",
+   "htf": null,
+   "quoted_spread": {
+    "n": 108,
+    "mean_r": 0.282,
+    "mean_r_ci": [
+     -0.083,
+     0.62
+    ],
+    "median_spread_r": 0.037
+   },
+   "window": "IS",
+   "params": {
+    "chain": "B3",
+    "side": "long",
+    "pool": "fractal",
+    "fractal_k": 2,
+    "day_start": "ny17",
+    "sweep_tol_atr": 0.15,
+    "fvg_min_atr": 0.1,
+    "entry": "near",
+    "tp_r": 3.0,
+    "target": "rr",
+    "min_rr": 1.8,
+    "fill_hours_ny": null,
+    "max_wait_bars": 20,
+    "link_bars": 20,
+    "ob_swing_k": 5,
+    "min_stop_atr": 0.5,
+    "cost_bps": 0.0,
+    "cost_abs": 0.1,
+    "spread": 0.2
+   },
+   "funnel_whole_frame": {
+    "no_zone": 219,
+    "zone_spent": 27,
+    "setups": 245,
+    "skipped_in_position": 69,
+    "replaced": 23,
+    "expired": 14,
+    "ran_away": 12,
+    "gapped_through_stop": 0,
+    "outside_window": 0,
+    "filled": 127,
+    "unfinished": 1
+   },
+   "stats": {
+    "n": 106,
+    "unfinished": 1,
+    "per_month": 4.4,
+    "winrate": 0.3302,
+    "mean_r": 0.306,
+    "mean_r_ci": [
+     -0.039,
+     0.652
+    ],
+    "pf": 1.449,
+    "gross_r": 0.315,
+    "gross_r_ci": [
+     -0.029,
+     0.66
+    ],
+    "median_risk_pct": 0.4597,
+    "median_risk_atr": 1.858,
+    "median_cost_r": 0.025,
+    "floor_share": 0.0,
+    "excess_r": -0.087,
+    "excess_r_ci": [
+     -0.436,
+     0.301
+    ]
+   },
+   "verdict": "неотличима от нуля",
+   "verdict_control": "неотличима от случайного",
+   "by_session": {
+    "asia": {
+     "n": 45,
+     "mean_r": 0.236,
+     "mean_r_ci": [
+      -0.297,
+      0.77
+     ]
+    },
+    "london": {
+     "n": 17,
+     "mean_r": 0.401,
+     "mean_r_ci": null
+    },
+    "london_open": {
+     "n": 8,
+     "mean_r": -1.012,
+     "mean_r_ci": null
+    },
+    "ny_am": {
+     "n": 12,
+     "mean_r": 0.324,
+     "mean_r_ci": null
+    },
+    "ny_pm": {
+     "n": 15,
+     "mean_r": 1.086,
+     "mean_r_ci": null
+    },
+    "off_hours": {
+     "n": 9,
+     "mean_r": 0.324,
+     "mean_r_ci": null
+    }
+   },
+   "by_flow": {
+    "по потоку": {
+     "n": 106,
+     "mean_r": 0.306,
+     "mean_r_ci": [
+      -0.039,
+      0.652
+     ]
+    }
+   },
+   "control": {
+    "n": 3057,
+    "gross_r": 0.403,
+    "net_r": 0.393
+   },
+   "seconds": 0.2
+  },
+  {
+   "name": "b2_1h_long__ce",
+   "tf": "1h",
+   "side": "long",
+   "htf": null,
+   "quoted_spread": {
+    "n": 38,
+    "mean_r": -0.319,
+    "mean_r_ci": [
+     -0.712,
+     0.076
+    ],
+    "median_spread_r": 0.109
+   },
+   "window": "IS",
+   "params": {
+    "chain": "B2",
+    "side": "long",
+    "pool": "fractal",
+    "fractal_k": 2,
+    "day_start": "ny17",
+    "sweep_tol_atr": 0.15,
+    "fvg_min_atr": 0.1,
+    "entry": "ce",
+    "tp_r": 2.0,
+    "target": "rr",
+    "min_rr": 1.8,
+    "fill_hours_ny": null,
+    "max_wait_bars": 20,
+    "link_bars": 20,
+    "ob_swing_k": 5,
+    "min_stop_atr": 0.5,
+    "cost_bps": 0.0,
+    "cost_abs": 0.1,
+    "spread": 0.2
+   },
+   "funnel_whole_frame": {
+    "zone_spent": 25,
+    "setups": 394,
+    "skipped_in_position": 0,
+    "replaced": 0,
+    "expired": 0,
+    "ran_away": 341,
+    "gapped_through_stop": 0,
+    "outside_window": 0,
+    "filled": 53,
+    "unfinished": 0
+   },
+   "stats": {
+    "n": 39,
+    "unfinished": 0,
+    "per_month": 1.6,
+    "winrate": 0.2308,
+    "mean_r": -0.337,
+    "mean_r_ci": [
+     -0.721,
+     0.048
+    ],
+    "pf": 0.573,
+    "gross_r": -0.308,
+    "gross_r_ci": [
+     -0.692,
+     0.077
+    ],
+    "median_risk_pct": 0.1321,
+    "median_risk_atr": 0.5,
+    "median_cost_r": 0.088,
+    "floor_share": 0.641,
+    "excess_r": -0.377,
+    "excess_r_ci": [
+     -0.757,
+     0.03
+    ]
+   },
+   "verdict": "неотличима от нуля",
+   "verdict_control": "неотличима от случайного",
+   "by_session": {
+    "asia": {
+     "n": 19,
+     "mean_r": -0.082,
+     "mean_r_ci": null
+    },
+    "london": {
+     "n": 4,
+     "mean_r": -0.282,
+     "mean_r_ci": null
+    },
+    "london_open": {
+     "n": 1,
+     "mean_r": -1.009,
+     "mean_r_ci": null
+    },
+    "ny_am": {
+     "n": 7,
+     "mean_r": -0.604,
+     "mean_r_ci": null
+    },
+    "ny_pm": {
+     "n": 6,
+     "mean_r": -0.527,
+     "mean_r_ci": null
+    },
+    "off_hours": {
+     "n": 2,
+     "mean_r": -1.031,
+     "mean_r_ci": null
+    }
+   },
+   "by_flow": {
+    "по потоку": {
+     "n": 39,
+     "mean_r": -0.337,
+     "mean_r_ci": [
+      -0.721,
+      0.048
+     ]
+    }
+   },
+   "control": {
+    "n": 3001,
+    "gross_r": 0.069,
+    "net_r": 0.04
+   },
+   "seconds": 0.1
+  },
+  {
+   "name": "b2_1h_long__tp15",
+   "tf": "1h",
+   "side": "long",
+   "htf": null,
+   "quoted_spread": {
+    "n": 125,
+    "mean_r": -0.018,
+    "mean_r_ci": [
+     -0.237,
+     0.202
+    ],
+    "median_spread_r": 0.07
+   },
+   "window": "IS",
+   "params": {
+    "chain": "B2",
+    "side": "long",
+    "pool": "fractal",
+    "fractal_k": 2,
+    "day_start": "ny17",
+    "sweep_tol_atr": 0.15,
+    "fvg_min_atr": 0.1,
+    "entry": "near",
+    "tp_r": 1.5,
+    "target": "rr",
+    "min_rr": 1.8,
+    "fill_hours_ny": null,
+    "max_wait_bars": 20,
+    "link_bars": 20,
+    "ob_swing_k": 5,
+    "min_stop_atr": 0.5,
+    "cost_bps": 0.0,
+    "cost_abs": 0.1,
+    "spread": 0.2
+   },
+   "funnel_whole_frame": {
+    "zone_spent": 25,
+    "setups": 394,
+    "skipped_in_position": 12,
+    "replaced": 3,
+    "expired": 1,
+    "ran_away": 212,
+    "gapped_through_stop": 2,
+    "outside_window": 0,
+    "filled": 163,
+    "unfinished": 0
+   },
+   "stats": {
+    "n": 133,
+    "unfinished": 0,
+    "per_month": 5.5,
+    "winrate": 0.4211,
+    "mean_r": 0.035,
+    "mean_r_ci": [
+     -0.173,
+     0.245
+    ],
+    "pf": 1.059,
+    "gross_r": 0.053,
+    "gross_r_ci": [
+     -0.154,
+     0.263
+    ],
+    "median_risk_pct": 0.2322,
+    "median_risk_atr": 1.008,
+    "median_cost_r": 0.05,
+    "floor_share": 0.0827,
+    "excess_r": -0.072,
+    "excess_r_ci": [
+     -0.287,
+     0.143
+    ]
+   },
+   "verdict": "неотличима от нуля",
+   "verdict_control": "неотличима от случайного",
+   "by_session": {
+    "asia": {
+     "n": 46,
+     "mean_r": 0.012,
+     "mean_r_ci": [
+      -0.318,
+      0.392
+     ]
+    },
+    "london": {
+     "n": 17,
+     "mean_r": -0.433,
+     "mean_r_ci": null
+    },
+    "london_open": {
+     "n": 18,
+     "mean_r": 0.369,
+     "mean_r_ci": null
+    },
+    "ny_am": {
+     "n": 17,
+     "mean_r": 0.307,
+     "mean_r_ci": null
+    },
+    "ny_pm": {
+     "n": 18,
+     "mean_r": -0.318,
+     "mean_r_ci": null
+    },
+    "off_hours": {
+     "n": 17,
+     "mean_r": 0.311,
+     "mean_r_ci": null
+    }
+   },
+   "by_flow": {
+    "по потоку": {
+     "n": 133,
+     "mean_r": 0.035,
+     "mean_r_ci": [
+      -0.173,
+      0.245
+     ]
+    }
+   },
+   "control": {
+    "n": 3055,
+    "gross_r": 0.125,
+    "net_r": 0.107
+   },
+   "seconds": 0.2
+  },
+  {
+   "name": "b2_1h_long__tp30",
+   "tf": "1h",
+   "side": "long",
+   "htf": null,
+   "quoted_spread": {
+    "n": 155,
+    "mean_r": 0.04,
+    "mean_r_ci": [
+     -0.22,
+     0.348
+    ],
+    "median_spread_r": 0.07
+   },
+   "window": "IS",
+   "params": {
+    "chain": "B2",
+    "side": "long",
+    "pool": "fractal",
+    "fractal_k": 2,
+    "day_start": "ny17",
+    "sweep_tol_atr": 0.15,
+    "fvg_min_atr": 0.1,
+    "entry": "near",
+    "tp_r": 3.0,
+    "target": "rr",
+    "min_rr": 1.8,
+    "fill_hours_ny": null,
+    "max_wait_bars": 20,
+    "link_bars": 20,
+    "ob_swing_k": 5,
+    "min_stop_atr": 0.5,
+    "cost_bps": 0.0,
+    "cost_abs": 0.1,
+    "spread": 0.2
+   },
+   "funnel_whole_frame": {
+    "zone_spent": 25,
+    "setups": 394,
+    "skipped_in_position": 60,
+    "replaced": 5,
+    "expired": 10,
+    "ran_away": 120,
+    "gapped_through_stop": 2,
+    "outside_window": 0,
+    "filled": 196,
+    "unfinished": 0
+   },
+   "stats": {
+    "n": 159,
+    "unfinished": 0,
+    "per_month": 6.6,
+    "winrate": 0.283,
+    "mean_r": 0.115,
+    "mean_r_ci": [
+     -0.163,
+     0.393
+    ],
+    "pf": 1.157,
+    "gross_r": 0.133,
+    "gross_r_ci": [
+     -0.144,
+     0.411
+    ],
+    "median_risk_pct": 0.2305,
+    "median_risk_atr": 1.003,
+    "median_cost_r": 0.051,
+    "floor_share": 0.0943,
+    "excess_r": -0.089,
+    "excess_r_ci": [
+     -0.368,
+     0.213
+    ]
+   },
+   "verdict": "неотличима от нуля",
+   "verdict_control": "неотличима от случайного",
+   "by_session": {
+    "asia": {
+     "n": 50,
+     "mean_r": -0.058,
+     "mean_r_ci": [
+      -0.536,
+      0.424
+     ]
+    },
+    "london": {
+     "n": 24,
+     "mean_r": -0.354,
+     "mean_r_ci": null
+    },
+    "london_open": {
+     "n": 18,
+     "mean_r": 0.979,
+     "mean_r_ci": null
+    },
+    "ny_am": {
+     "n": 26,
+     "mean_r": 0.368,
+     "mean_r_ci": null
+    },
+    "ny_pm": {
+     "n": 22,
+     "mean_r": -0.106,
+     "mean_r_ci": null
+    },
+    "off_hours": {
+     "n": 19,
+     "mean_r": 0.251,
+     "mean_r_ci": null
+    }
+   },
+   "by_flow": {
+    "по потоку": {
+     "n": 159,
+     "mean_r": 0.115,
+     "mean_r_ci": [
+      -0.163,
+      0.393
+     ]
+    }
+   },
+   "control": {
+    "n": 3010,
+    "gross_r": 0.222,
+    "net_r": 0.204
+   },
+   "seconds": 0.2
+  },
+  {
+   "name": "c0_1h_long__ce",
+   "tf": "1h",
+   "side": "long",
+   "htf": null,
+   "quoted_spread": {
+    "n": 398,
+    "mean_r": 0.031,
+    "mean_r_ci": [
+     -0.112,
+     0.175
+    ],
+    "median_spread_r": 0.061
+   },
+   "window": "IS",
+   "params": {
+    "chain": "C0",
+    "side": "long",
+    "pool": "fractal",
+    "fractal_k": 2,
+    "day_start": "ny17",
+    "sweep_tol_atr": 0.15,
+    "fvg_min_atr": 0.1,
+    "entry": "ce",
+    "tp_r": 2.0,
+    "target": "rr",
+    "min_rr": 1.8,
+    "fill_hours_ny": null,
+    "max_wait_bars": 20,
+    "link_bars": 20,
+    "ob_swing_k": 5,
+    "min_stop_atr": 0.5,
+    "cost_bps": 0.0,
+    "cost_abs": 0.1,
+    "spread": 0.2
+   },
+   "funnel_whole_frame": {
+    "setups": 1213,
+    "skipped_in_position": 210,
+    "replaced": 218,
+    "expired": 6,
+    "ran_away": 292,
+    "gapped_through_stop": 2,
+    "outside_window": 0,
+    "filled": 485,
+    "unfinished": 1
+   },
+   "stats": {
+    "n": 408,
+    "unfinished": 1,
+    "per_month": 17.0,
+    "winrate": 0.3701,
+    "mean_r": 0.094,
+    "mean_r_ci": [
+     -0.039,
+     0.234
+    ],
+    "pf": 1.146,
+    "gross_r": 0.11,
+    "gross_r_ci": [
+     -0.022,
+     0.25
+    ],
+    "median_risk_pct": 0.2822,
+    "median_risk_atr": 1.129,
+    "median_cost_r": 0.04,
+    "floor_share": 0.0441,
+    "excess_r": -0.088,
+    "excess_r_ci": [
+     -0.238,
+     0.061
+    ]
+   },
+   "verdict": "неотличима от нуля",
+   "verdict_control": "неотличима от случайного",
+   "by_session": {
+    "asia": {
+     "n": 115,
+     "mean_r": 0.053,
+     "mean_r_ci": [
+      -0.207,
+      0.339
+     ]
+    },
+    "london": {
+     "n": 53,
+     "mean_r": -0.171,
+     "mean_r_ci": [
+      -0.512,
+      0.17
+     ]
+    },
+    "london_open": {
+     "n": 74,
+     "mean_r": -0.007,
+     "mean_r_ci": [
+      -0.332,
+      0.319
+     ]
+    },
+    "ny_am": {
+     "n": 64,
+     "mean_r": 0.155,
+     "mean_r_ci": [
+      -0.175,
+      0.53
+     ]
+    },
+    "ny_pm": {
+     "n": 44,
+     "mean_r": 0.215,
+     "mean_r_ci": [
+      -0.196,
+      0.625
+     ]
+    },
+    "off_hours": {
+     "n": 58,
+     "mean_r": 0.385,
+     "mean_r_ci": [
+      0.022,
+      0.799
+     ]
+    }
+   },
+   "by_flow": {
+    "по потоку": {
+     "n": 314,
+     "mean_r": 0.092,
+     "mean_r_ci": [
+      -0.062,
+      0.254
+     ]
+    },
+    "против потока": {
+     "n": 94,
+     "mean_r": 0.1,
+     "mean_r_ci": [
+      -0.186,
+      0.389
+     ]
+    }
+   },
+   "control": {
+    "n": 3257,
+    "gross_r": 0.198,
+    "net_r": 0.182
+   },
+   "seconds": 0.6
+  },
+  {
+   "name": "c0_1h_long__tp15",
+   "tf": "1h",
+   "side": "long",
+   "htf": null,
+   "quoted_spread": {
+    "n": 427,
+    "mean_r": 0.076,
+    "mean_r_ci": [
+     -0.042,
+     0.193
+    ],
+    "median_spread_r": 0.048
+   },
+   "window": "IS",
+   "params": {
+    "chain": "C0",
+    "side": "long",
+    "pool": "fractal",
+    "fractal_k": 2,
+    "day_start": "ny17",
+    "sweep_tol_atr": 0.15,
+    "fvg_min_atr": 0.1,
+    "entry": "near",
+    "tp_r": 1.5,
+    "target": "rr",
+    "min_rr": 1.8,
+    "fill_hours_ny": null,
+    "max_wait_bars": 20,
+    "link_bars": 20,
+    "ob_swing_k": 5,
+    "min_stop_atr": 0.5,
+    "cost_bps": 0.0,
+    "cost_abs": 0.1,
+    "spread": 0.2
+   },
+   "funnel_whole_frame": {
+    "setups": 1213,
+    "skipped_in_position": 308,
+    "replaced": 176,
+    "expired": 2,
+    "ran_away": 205,
+    "gapped_through_stop": 2,
+    "outside_window": 0,
+    "filled": 520,
+    "unfinished": 1
+   },
+   "stats": {
+    "n": 439,
+    "unfinished": 1,
+    "per_month": 18.3,
+    "winrate": 0.4533,
+    "mean_r": 0.12,
+    "mean_r_ci": [
+     0.006,
+     0.235
+    ],
+    "pf": 1.217,
+    "gross_r": 0.134,
+    "gross_r_ci": [
+     0.019,
+     0.248
+    ],
+    "median_risk_pct": 0.3531,
+    "median_risk_atr": 1.377,
+    "median_cost_r": 0.032,
+    "floor_share": 0.0091,
+    "excess_r": -0.056,
+    "excess_r_ci": [
+     -0.181,
+     0.07
+    ]
+   },
+   "verdict": "ЭДЖ на IS",
+   "verdict_control": "неотличима от случайного",
+   "by_session": {
+    "asia": {
+     "n": 146,
+     "mean_r": 0.237,
+     "mean_r_ci": [
+      0.031,
+      0.444
+     ]
+    },
+    "london": {
+     "n": 58,
+     "mean_r": -0.024,
+     "mean_r_ci": [
+      -0.326,
+      0.279
+     ]
+    },
+    "london_open": {
+     "n": 56,
+     "mean_r": -0.17,
+     "mean_r_ci": [
+      -0.483,
+      0.144
+     ]
+    },
+    "ny_am": {
+     "n": 50,
+     "mean_r": -0.115,
+     "mean_r_ci": [
+      -0.417,
+      0.237
+     ]
+    },
+    "ny_pm": {
+     "n": 56,
+     "mean_r": 0.241,
+     "mean_r_ci": [
+      -0.072,
+      0.554
+     ]
+    },
+    "off_hours": {
+     "n": 73,
+     "mean_r": 0.293,
+     "mean_r_ci": [
+      0.016,
+      0.572
+     ]
+    }
+   },
+   "by_flow": {
+    "по потоку": {
+     "n": 340,
+     "mean_r": 0.126,
+     "mean_r_ci": [
+      0.001,
+      0.259
+     ]
+    },
+    "против потока": {
+     "n": 99,
+     "mean_r": 0.099,
+     "mean_r_ci": [
+      -0.154,
+      0.331
+     ]
+    }
+   },
+   "control": {
+    "n": 3063,
+    "gross_r": 0.189,
+    "net_r": 0.176
+   },
+   "seconds": 0.7
+  },
+  {
+   "name": "c0_1h_long__tp30",
+   "tf": "1h",
+   "side": "long",
+   "htf": null,
+   "quoted_spread": {
+    "n": 340,
+    "mean_r": 0.151,
+    "mean_r_ci": [
+     -0.037,
+     0.338
+    ],
+    "median_spread_r": 0.049
+   },
+   "window": "IS",
+   "params": {
+    "chain": "C0",
+    "side": "long",
+    "pool": "fractal",
+    "fractal_k": 2,
+    "day_start": "ny17",
+    "sweep_tol_atr": 0.15,
+    "fvg_min_atr": 0.1,
+    "entry": "near",
+    "tp_r": 3.0,
+    "target": "rr",
+    "min_rr": 1.8,
+    "fill_hours_ny": null,
+    "max_wait_bars": 20,
+    "link_bars": 20,
+    "ob_swing_k": 5,
+    "min_stop_atr": 0.5,
+    "cost_bps": 0.0,
+    "cost_abs": 0.1,
+    "spread": 0.2
+   },
+   "funnel_whole_frame": {
+    "setups": 1213,
+    "skipped_in_position": 560,
+    "replaced": 214,
+    "expired": 3,
+    "ran_away": 31,
+    "gapped_through_stop": 2,
+    "outside_window": 0,
+    "filled": 403,
+    "unfinished": 1
+   },
+   "stats": {
+    "n": 343,
+    "unfinished": 1,
+    "per_month": 14.3,
+    "winrate": 0.3061,
+    "mean_r": 0.211,
+    "mean_r_ci": [
+     0.013,
+     0.411
+    ],
+    "pf": 1.301,
+    "gross_r": 0.226,
+    "gross_r_ci": [
+     0.027,
+     0.426
+    ],
+    "median_risk_pct": 0.3366,
+    "median_risk_atr": 1.318,
+    "median_cost_r": 0.033,
+    "floor_share": 0.0087,
+    "excess_r": -0.111,
+    "excess_r_ci": [
+     -0.314,
+     0.094
+    ]
+   },
+   "verdict": "ЭДЖ на IS",
+   "verdict_control": "неотличима от случайного",
+   "by_session": {
+    "asia": {
+     "n": 121,
+     "mean_r": 0.407,
+     "mean_r_ci": [
+      0.045,
+      0.738
+     ]
+    },
+    "london": {
+     "n": 49,
+     "mean_r": 0.047,
+     "mean_r_ci": [
+      -0.442,
+      0.54
+     ]
+    },
+    "london_open": {
+     "n": 38,
+     "mean_r": -0.282,
+     "mean_r_ci": [
+      -0.704,
+      0.246
+     ]
+    },
+    "ny_am": {
+     "n": 38,
+     "mean_r": -0.28,
+     "mean_r_ci": [
+      -0.703,
+      0.246
+     ]
+    },
+    "ny_pm": {
+     "n": 42,
+     "mean_r": 0.419,
+     "mean_r_ci": [
+      -0.152,
+      0.992
+     ]
+    },
+    "off_hours": {
+     "n": 55,
+     "mean_r": 0.45,
+     "mean_r_ci": [
+      -0.064,
+      0.966
+     ]
+    }
+   },
+   "by_flow": {
+    "по потоку": {
+     "n": 254,
+     "mean_r": 0.262,
+     "mean_r_ci": [
+      0.027,
+      0.483
+     ]
+    },
+    "против потока": {
+     "n": 89,
+     "mean_r": 0.068,
+     "mean_r_ci": [
+      -0.292,
+      0.437
+     ]
+    }
+   },
+   "control": {
+    "n": 3077,
+    "gross_r": 0.337,
+    "net_r": 0.323
+   },
+   "seconds": 0.5
+  },
+  {
+   "name": "c1_1h_long__ce",
+   "tf": "1h",
+   "side": "long",
+   "htf": null,
+   "quoted_spread": {
+    "n": 315,
+    "mean_r": 0.04,
+    "mean_r_ci": [
+     -0.112,
+     0.194
+    ],
+    "median_spread_r": 0.062
+   },
+   "window": "IS",
+   "params": {
+    "chain": "C1",
+    "side": "long",
+    "pool": "fractal",
+    "fractal_k": 2,
+    "day_start": "ny17",
+    "sweep_tol_atr": 0.15,
+    "fvg_min_atr": 0.1,
+    "entry": "ce",
+    "tp_r": 2.0,
+    "target": "rr",
+    "min_rr": 1.8,
+    "fill_hours_ny": null,
+    "max_wait_bars": 20,
+    "link_bars": 20,
+    "ob_swing_k": 5,
+    "min_stop_atr": 0.5,
+    "cost_bps": 0.0,
+    "cost_abs": 0.1,
+    "spread": 0.2
+   },
+   "funnel_whole_frame": {
+    "against_flow": 248,
+    "setups": 965,
+    "skipped_in_position": 141,
+    "replaced": 188,
+    "expired": 6,
+    "ran_away": 251,
+    "gapped_through_stop": 0,
+    "outside_window": 0,
+    "filled": 379,
+    "unfinished": 1
+   },
+   "stats": {
+    "n": 322,
+    "unfinished": 1,
+    "per_month": 13.4,
+    "winrate": 0.3696,
+    "mean_r": 0.092,
+    "mean_r_ci": [
+     -0.075,
+     0.242
+    ],
+    "pf": 1.144,
+    "gross_r": 0.109,
+    "gross_r_ci": [
+     -0.059,
+     0.258
+    ],
+    "median_risk_pct": 0.273,
+    "median_risk_atr": 1.129,
+    "median_cost_r": 0.04,
+    "floor_share": 0.0311,
+    "excess_r": -0.099,
+    "excess_r_ci": [
+     -0.263,
+     0.071
+    ]
+   },
+   "verdict": "неотличима от нуля",
+   "verdict_control": "неотличима от случайного",
+   "by_session": {
+    "asia": {
+     "n": 92,
+     "mean_r": 0.093,
+     "mean_r_ci": [
+      -0.202,
+      0.386
+     ]
+    },
+    "london": {
+     "n": 52,
+     "mean_r": -0.097,
+     "mean_r_ci": [
+      -0.445,
+      0.306
+     ]
+    },
+    "london_open": {
+     "n": 49,
+     "mean_r": -0.103,
+     "mean_r_ci": [
+      -0.472,
+      0.267
+     ]
+    },
+    "ny_am": {
+     "n": 50,
+     "mean_r": 0.183,
+     "mean_r_ci": [
+      -0.236,
+      0.603
+     ]
+    },
+    "ny_pm": {
+     "n": 36,
+     "mean_r": 0.238,
+     "mean_r_ci": [
+      -0.261,
+      0.736
+     ]
+    },
+    "off_hours": {
+     "n": 43,
+     "mean_r": 0.314,
+     "mean_r_ci": [
+      -0.105,
+      0.734
+     ]
+    }
+   },
+   "by_flow": {
+    "по потоку": {
+     "n": 322,
+     "mean_r": 0.092,
+     "mean_r_ci": [
+      -0.075,
+      0.242
+     ]
+    }
+   },
+   "control": {
+    "n": 3215,
+    "gross_r": 0.207,
+    "net_r": 0.191
+   },
+   "seconds": 0.5
+  },
+  {
+   "name": "c1_1h_long__tp15",
+   "tf": "1h",
+   "side": "long",
+   "htf": null,
+   "quoted_spread": {
+    "n": 340,
+    "mean_r": 0.09,
+    "mean_r_ci": [
+     -0.035,
+     0.229
+    ],
+    "median_spread_r": 0.048
+   },
+   "window": "IS",
+   "params": {
+    "chain": "C1",
+    "side": "long",
+    "pool": "fractal",
+    "fractal_k": 2,
+    "day_start": "ny17",
+    "sweep_tol_atr": 0.15,
+    "fvg_min_atr": 0.1,
+    "entry": "near",
+    "tp_r": 1.5,
+    "target": "rr",
+    "min_rr": 1.8,
+    "fill_hours_ny": null,
+    "max_wait_bars": 20,
+    "link_bars": 20,
+    "ob_swing_k": 5,
+    "min_stop_atr": 0.5,
+    "cost_bps": 0.0,
+    "cost_abs": 0.1,
+    "spread": 0.2
+   },
+   "funnel_whole_frame": {
+    "against_flow": 248,
+    "setups": 965,
+    "skipped_in_position": 217,
+    "replaced": 155,
+    "expired": 3,
+    "ran_away": 177,
+    "gapped_through_stop": 0,
+    "outside_window": 0,
+    "filled": 413,
+    "unfinished": 1
+   },
+   "stats": {
+    "n": 349,
+    "unfinished": 1,
+    "per_month": 14.5,
+    "winrate": 0.4585,
+    "mean_r": 0.133,
+    "mean_r_ci": [
+     0.004,
+     0.268
+    ],
+    "pf": 1.242,
+    "gross_r": 0.146,
+    "gross_r_ci": [
+     0.017,
+     0.282
+    ],
+    "median_risk_pct": 0.3533,
+    "median_risk_atr": 1.417,
+    "median_cost_r": 0.032,
+    "floor_share": 0.0115,
+    "excess_r": -0.026,
+    "excess_r_ci": [
+     -0.162,
+     0.111
+    ]
+   },
+   "verdict": "ЭДЖ на IS",
+   "verdict_control": "неотличима от случайного",
+   "by_session": {
+    "asia": {
+     "n": 113,
+     "mean_r": 0.27,
+     "mean_r_ci": [
+      0.048,
+      0.492
+     ]
+    },
+    "london": {
+     "n": 52,
+     "mean_r": -0.006,
+     "mean_r_ci": [
+      -0.342,
+      0.331
+     ]
+    },
+    "london_open": {
+     "n": 43,
+     "mean_r": -0.145,
+     "mean_r_ci": [
+      -0.495,
+      0.206
+     ]
+    },
+    "ny_am": {
+     "n": 38,
+     "mean_r": -0.227,
+     "mean_r_ci": [
+      -0.559,
+      0.167
+     ]
+    },
+    "ny_pm": {
+     "n": 46,
+     "mean_r": 0.295,
+     "mean_r_ci": [
+      -0.085,
+      0.675
+     ]
+    },
+    "off_hours": {
+     "n": 57,
+     "mean_r": 0.305,
+     "mean_r_ci": [
+      -0.002,
+      0.613
+     ]
+    }
+   },
+   "by_flow": {
+    "по потоку": {
+     "n": 349,
+     "mean_r": 0.133,
+     "mean_r_ci": [
+      0.004,
+      0.268
+     ]
+    }
+   },
+   "control": {
+    "n": 3127,
+    "gross_r": 0.172,
+    "net_r": 0.159
+   },
+   "seconds": 0.5
+  },
+  {
+   "name": "c1_1h_long__tp30",
+   "tf": "1h",
+   "side": "long",
+   "htf": null,
+   "quoted_spread": {
+    "n": 271,
+    "mean_r": 0.197,
+    "mean_r_ci": [
+     -0.025,
+     0.433
+    ],
+    "median_spread_r": 0.049
+   },
+   "window": "IS",
+   "params": {
+    "chain": "C1",
+    "side": "long",
+    "pool": "fractal",
+    "fractal_k": 2,
+    "day_start": "ny17",
+    "sweep_tol_atr": 0.15,
+    "fvg_min_atr": 0.1,
+    "entry": "near",
+    "tp_r": 3.0,
+    "target": "rr",
+    "min_rr": 1.8,
+    "fill_hours_ny": null,
+    "max_wait_bars": 20,
+    "link_bars": 20,
+    "ob_swing_k": 5,
+    "min_stop_atr": 0.5,
+    "cost_bps": 0.0,
+    "cost_abs": 0.1,
+    "spread": 0.2
+   },
+   "funnel_whole_frame": {
+    "against_flow": 248,
+    "setups": 965,
+    "skipped_in_position": 411,
+    "replaced": 194,
+    "expired": 5,
+    "ran_away": 25,
+    "gapped_through_stop": 0,
+    "outside_window": 0,
+    "filled": 330,
+    "unfinished": 1
+   },
+   "stats": {
+    "n": 275,
+    "unfinished": 1,
+    "per_month": 11.5,
+    "winrate": 0.32,
+    "mean_r": 0.267,
+    "mean_r_ci": [
+     0.049,
+     0.486
+    ],
+    "pf": 1.387,
+    "gross_r": 0.28,
+    "gross_r_ci": [
+     0.062,
+     0.498
+    ],
+    "median_risk_pct": 0.353,
+    "median_risk_atr": 1.384,
+    "median_cost_r": 0.032,
+    "floor_share": 0.0073,
+    "excess_r": -0.075,
+    "excess_r_ci": [
+     -0.299,
+     0.159
+    ]
+   },
+   "verdict": "ЭДЖ на IS",
+   "verdict_control": "неотличима от случайного",
+   "by_session": {
+    "asia": {
+     "n": 94,
+     "mean_r": 0.519,
+     "mean_r_ci": [
+      0.136,
+      0.903
+     ]
+    },
+    "london": {
+     "n": 40,
+     "mean_r": 0.085,
+     "mean_r_ci": [
+      -0.415,
+      0.686
+     ]
+    },
+    "london_open": {
+     "n": 34,
+     "mean_r": -0.076,
+     "mean_r_ci": [
+      -0.664,
+      0.513
+     ]
+    },
+    "ny_am": {
+     "n": 31,
+     "mean_r": -0.373,
+     "mean_r_ci": [
+      -0.887,
+      0.145
+     ]
+    },
+    "ny_pm": {
+     "n": 37,
+     "mean_r": 0.613,
+     "mean_r_ci": [
+      -0.036,
+      1.261
+     ]
+    },
+    "off_hours": {
+     "n": 39,
+     "mean_r": 0.323,
+     "mean_r_ci": [
+      -0.292,
+      0.939
+     ]
+    }
+   },
+   "by_flow": {
+    "по потоку": {
+     "n": 275,
+     "mean_r": 0.267,
+     "mean_r_ci": [
+      0.049,
+      0.486
+     ]
+    }
+   },
+   "control": {
+    "n": 3012,
+    "gross_r": 0.355,
+    "net_r": 0.341
+   },
+   "seconds": 0.5
+  }
+ ]
+}

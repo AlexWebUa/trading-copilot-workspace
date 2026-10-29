@@ -243,3 +243,48 @@ def test_htf_bias_is_released_only_when_the_breaking_candle_closes():
     events = [{"break_ts": "2026-01-02T10:00:00Z", "direction": "bullish"}]
     index = pd.date_range("2026-01-02 10:45", periods=4, freq="5min", tz="UTC", unit="ms")
     assert list(bias_series(events, htf_minutes=60, index=index)) == [0, 0, 1, 1]
+
+
+# ---------------------------------------------------------------------------
+# A market that closes (spot gold, 2026-10-06)
+# ---------------------------------------------------------------------------
+
+def test_session_anchor_is_the_first_bar_after_the_daily_break():
+    """Spot gold in July: the day ends at 17:00 New York (21:00 UTC), trading
+    resumes at 22:00 UTC. That first bar opens the session."""
+    before = pd.date_range("2026-07-07 20:30", periods=6, freq="5min", tz="UTC", unit="ms")
+    after = pd.date_range("2026-07-07 22:00", periods=4, freq="5min", tz="UTC", unit="ms")
+    index = before.append(after)
+    starts = index[_session_starts(index, "session")]
+    assert [f"{t:%m-%d %H:%M}" for t in starts] == ["07-07 22:00"]
+
+
+def test_new_york_anchor_does_not_fire_when_the_market_was_shut_at_the_open():
+    """Sunday: nothing trades at 09:30 New York. The first bar that does trade,
+    at 18:00, must not be taken for the New York open."""
+    friday = pd.date_range("2026-07-03 20:30", periods=6, freq="5min", tz="UTC", unit="ms")
+    sunday = pd.date_range("2026-07-05 22:00", periods=6, freq="5min", tz="UTC", unit="ms")
+    monday = pd.date_range("2026-07-06 13:20", periods=6, freq="5min", tz="UTC", unit="ms")
+    index = friday.append(sunday).append(monday)
+    starts = index[_session_starts(index, "ny_open")]
+    assert [f"{t:%m-%d %H:%M}" for t in starts] == ["07-06 13:30"]
+
+
+def test_a_stop_gapped_through_fills_at_the_open():
+    """Long from 101.4, stop 100.0. The next bar opens at 98.0 — over a weekend
+    that is where the position gets out, not at 100.0."""
+    rows = _entry_rows() + [(98.0, 98.5, 97.5, 98.2)]
+    honest = dict(fill_at_close=True, stop_first=True, skip_entry_bar=True)
+    at_stop = simulate(_df(rows), OrbParams(**honest)).trades.iloc[0]
+    at_open = simulate(_df(rows), OrbParams(**honest, gap_stop=True)).trades.iloc[0]
+    assert at_stop["gross_pct"] == pytest.approx((100.0 - 101.4) / 101.4 * 100)
+    assert at_open["gross_pct"] == pytest.approx((98.0 - 101.4) / 101.4 * 100)
+    assert at_open["sl_init"] == pytest.approx(100.0), "the planned stop is not rewritten"
+
+
+def test_round_trip_cost_in_price_units():
+    """0.30 on an entry of 101.4 is 0.2959% of price, whatever the exit."""
+    rows = _entry_rows() + [(98.0, 98.5, 97.5, 98.2)]
+    honest = dict(fill_at_close=True, stop_first=True, skip_entry_bar=True)
+    t = simulate(_df(rows), OrbParams(**honest, cost_abs=0.30)).trades.iloc[0]
+    assert t["gross_pct"] - t["net_pct"] == pytest.approx(0.30 / 101.4 * 100)

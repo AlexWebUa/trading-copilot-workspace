@@ -1,6 +1,6 @@
 # Trading Co-Pilot — Current State
 
-_Last updated: 2026-09-15._ What exists and how trustworthy it is. Roadmap: [PLAN.md](PLAN.md). Design:
+_Last updated: 2026-10-06._ What exists and how trustworthy it is. Roadmap: [PLAN.md](PLAN.md). Design:
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Why the trust caveats: [docs/AUDIT_HISTORY.md](docs/AUDIT_HISTORY.md).
 
 ## Headline
@@ -16,6 +16,74 @@ trades, and its one borderline arm, `sb_nyam_mkt_long`, fell from +0.633R
 [+0.02, +1.26] to **+0.302R [-0.29, +0.92]** once costs were charged
 (`docs/SETUP_ICT_SILVER_BULLET.md` → прогон 2). Do not quote any
 pre-2026-08-27 backtest figure.
+
+### Done 2026-10-29 — every BTC strategy on gold, in-sample
+
+- Chains (211 arms), ORB (8 cells), Bellissimo (4), Silver Bullet (12) and 30mOF
+  (24) are all scored, the engine arms against a same-side random entry via
+  `scripts/engine_control.py`. Two arms of ~260 beat it — `of30_poi_short` (46
+  trades, itself +0.31R [−0.25, +0.96]) and `a1_session_1h_long` (36 trades) —
+  against six or seven expected by chance. `sb_nypm_mkt_long` clears zero but not a
+  random long. `docs/RESULTS_XAUUSD.md`.
+- The gold held-out year is sealed; opening it for the two candidates is the
+  trader's call.
+- The `SetupRule` engine now runs on an offline source: `data/sources.py`, a hard
+  `until` ceiling on `DukascopySource`, and an LTF request by the backtest's own
+  window. `orb_algo.py` handles a market that closes (session anchor, stops
+  gapped over a weekend, costs in price units). Suite: **745 passed, 3 xfailed**.
+
+### Landed 2026-10-06
+
+- **XAUUSD is on disk and readable offline.** Dukascopy spot, M1 bid and ask,
+  2015-01 to 2026-09 (4.16M bars), outside the repository. `copilot/data/dukascopy.py`
+  (`DukascopySource`; 4h/1d anchored to 17:00 New York; `trading_day`),
+  `scripts/fetch_dukascopy.py`, `scripts/measure_xau.py`, 18 tests. The resample
+  matches Dukascopy's own m5/h1 bars exactly. A round trip costs one 1.64 bps
+  spread against BTC's 12 bps; in R that is a third of BTC's cost on every
+  timeframe. `docs/DATA_XAUUSD.md`.
+- **The trader's example on gold: no edge either.** `run_combo.py --symbol
+  XAUUSD`, stage 1, ten arms, the trader's forex.com costs (0.20 spread, 0.10
+  commission per round trip): eight arms indistinguishable from a same-side
+  random entry, two worse; 3,909 trades, 0.06R below the control on average.
+  `combo.py` now fills through the spread on a bid chart (a long limit trades
+  when the ASK reaches it; a short's stop a spread early) and BTC results are
+  bit-for-bit unchanged. Suite: **735 passed, 3 xfailed**.
+
+- **Detector combinations closed: no edge, out of sample included.** With the
+  trader's answers (sessions Asia 02-10 / London 10-18 / New York 15-23 Kyiv,
+  HTF target = fractal) stages 2b and 8b ran and added nothing. 173 arms
+  in-sample; against a same-side random entry 143 are indistinguishable, 4
+  worse, 24 too few, 2 better — one chain, `b3_1h_long` and its 3R variant. The
+  held-out year was opened once for those two: -0.089R [-0.42, +0.26] and
+  -0.375R [-0.76, +0.07]. `docs/SETUP_COMBOS.md`.
+- **Edge is now measured against a same-side random entry, not zero** — the
+  trader's decision, `docs/RESEARCH_PROTOCOL.md` §2.5. `run_combo.py` draws
+  3 000-20 000 random trades per arm with each trade's own risk and
+  reward-to-risk and bootstraps the difference. The `SetupRule` engine does
+  not compute this control yet.
+- `combo.py` gained three-session pools with a seven-day life and a
+  higher-timeframe fractal target (`target="htf_fractal"`, `min_rr`).
+  `tests/test_combo.py`: 113 tests. Suite: **725 passed, 3 xfailed**.
+
+### Landed 2026-10-03
+
+- **Detector combinations** — 14 "trigger, then zone, then retest" chains
+  (sweep / BOS / cBOS x FVG / IFVG / BPR / order block, with and without an
+  order-flow filter) on 3m-1h, staged at <= 20 arms. 151 arms in-sample: 86
+  negative, 45 indistinguishable from zero, 18 too few trades, 2 above zero —
+  both the same chain (`b3_1h_long`, cBOS -> FVG) in a window where BTC rose
+  4.42x. Gross of costs every chain sits on its random-entry control (median
+  excess -0.02R). The held-out year is unopened. `docs/SETUP_COMBOS.md`.
+- **`copilot/backtest/combo.py`** — a standalone event-stream simulator: each
+  stream is computed once per frame and stamped with the bar at whose close it
+  is known; every chain passes a prefix-invariance test (trades closed before
+  bar N are identical on the frame cut at N). `scripts/run_combo.py`,
+  `scripts/report_combo.py`, `tests/test_combo.py` (101 tests). Suite:
+  **695 passed, 3 xfailed**.
+- **A random-entry control is not minus-costs in a trending window.** A random
+  1h long with a 2R target made about +0.09R gross over the in-sample years.
+  Verdicts against zero flatter long arms; the write-up carries the control
+  beside every arm and proposes it as the reference going forward.
 
 ### Landed 2026-09-15
 

@@ -33,7 +33,7 @@ What is lost, and why it is acceptable:
   * Explicit `cache_control` placement — the CLI manages its own prompt cache.
   * `MAX_TURNS` as a hard ceiling — bounded by a wall-clock timeout instead.
   * ~17k tokens of Claude Code's own tool schemas are prepended to every run
-    even with `--system-prompt`; that overhead is the price of plan billing.
+    even with `--system-prompt-file`; that overhead is the price of plan billing.
 """
 
 from __future__ import annotations
@@ -42,6 +42,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import threading
 from pathlib import Path
 from typing import Any, Callable, Iterable, Iterator
@@ -57,7 +58,7 @@ from copilot.llm.trace import write_trace
 MCP_SERVER_NAME = "trading-copilot"
 TOOL_PREFIX = f"mcp__{MCP_SERVER_NAME}__"
 
-DEFAULT_MODEL = "claude-opus-5"
+DEFAULT_MODEL = "claude-opus-5-5"
 DEFAULT_TIMEOUT_S = 900
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -153,6 +154,20 @@ def _mcp_config() -> str:
     return json.dumps({"mcpServers": {MCP_SERVER_NAME: server}})
 
 
+def _write_system_prompt(system: str) -> Path:
+    """Park the system prompt in a temp file for `--system-prompt-file`.
+
+    It cannot ride on argv: with the KB injected it runs to ~90k characters,
+    and Windows caps a whole command line at 32,767. CreateProcess refuses
+    with WinError 206, which Python surfaces as FileNotFoundError — i.e. as a
+    missing `claude` binary.
+    """
+    fd, name = tempfile.mkstemp(prefix="copilot-system-", suffix=".md")
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(system)
+    return Path(name)
+
+
 def stream_claude_cli(argv: list[str], timeout: int = DEFAULT_TIMEOUT_S) -> Iterator[str]:
     """Run `claude` and yield its stdout lines as they arrive.
 
@@ -172,6 +187,13 @@ def stream_claude_cli(argv: list[str], timeout: int = DEFAULT_TIMEOUT_S) -> Iter
             bufsize=1,
         )
     except FileNotFoundError as exc:
+        # Windows reports an over-long command line as FileNotFoundError too —
+        # don't blame a missing binary for that.
+        if getattr(exc, "winerror", None) == 206:
+            raise ClaudeCLIError(
+                "The `claude` command line exceeds the Windows 32,767-character "
+                "limit — shorten the prompt."
+            ) from exc
         raise ClaudeCLIError(
             f"`{argv[0]}` not found. Install the Claude Code CLI "
             "(https://claude.com/claude-code) or set COPILOT_CLAUDE_BIN."
@@ -396,15 +418,22 @@ class ClaudeCLIAgent:
             )
         ) + _CLI_ADDENDUM
 
-        argv = self._build_argv(user_query, system)
-        if verbose:
-            resumed = f" (resuming {self._session_id})" if self._session_id else ""
-            print(f"  [cli] {self._bin} -p ... --model {self.model}{resumed}", file=sys.stderr)
+        system_file = _write_system_prompt(system)
+        try:
+            argv = self._build_argv(user_query, system_file)
+            if verbose:
+                resumed = f" (resuming {self._session_id})" if self._session_id else ""
+                print(f"  [cli] {self._bin} -p ... --model {self.model}{resumed}", file=sys.stderr)
 
-        self._messages.append({"role": "user", "content": user_query})
+            self._messages.append({"role": "user", "content": user_query})
 
-        lines = self._runner(argv) if self._runner else stream_claude_cli(argv, self._timeout)
-        parsed = parse_stream(lines, self.symbol, verbose=verbose)
+            lines = self._runner(argv) if self._runner else stream_claude_cli(argv, self._timeout)
+            parsed = parse_stream(lines, self.symbol, verbose=verbose)
+        finally:
+            try:
+                system_file.unlink(missing_ok=True)
+            except OSError:
+                pass
 
         self._session_id = parsed.session_id or self._session_id
         final_text = parsed.text
@@ -442,11 +471,11 @@ class ClaudeCLIAgent:
     def history(self) -> list[dict]:
         return list(self._messages)
 
-    def _build_argv(self, prompt: str, system: str) -> list[str]:
+    def _build_argv(self, prompt: str, system_file: Path) -> list[str]:
         argv = [
             self._bin,
             "-p", prompt,
-            "--system-prompt", system,
+            "--system-prompt-file", str(system_file),
             "--mcp-config", _mcp_config(),
             "--strict-mcp-config",
             # Prefix match: allows every detector tool without enumerating them,
@@ -463,7 +492,7 @@ class ClaudeCLIAgent:
 
 
 def _flatten_system(blocks: list[dict]) -> str:
-    """Collapse Anthropic system blocks into the plain string `--system-prompt` takes.
+    """Collapse Anthropic system blocks into the plain string `--system-prompt-file` holds.
 
     The `cache_control` marker on the core block is dropped — Claude Code decides
     its own cache breakpoints and offers no flag to place them.

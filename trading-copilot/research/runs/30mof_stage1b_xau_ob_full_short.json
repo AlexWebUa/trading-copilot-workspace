@@ -1,0 +1,199 @@
+{
+  "symbol": "XAUUSD",
+  "tf": "30m",
+  "bars": 17520,
+  "stage": "1b",
+  "start": "2023-09-14T00:00:00Z",
+  "end": "2025-09-14T00:00:00Z",
+  "fee_bps": 0.4,
+  "slippage_bps": 0.2,
+  "of_lookback": 8000,
+  "min_stop_atr": null,
+  "arms": {
+    "of30_ob_full_short": {
+      "symbol": "XAUUSD",
+      "tf": "30m",
+      "start": "2023-09-15T02:00:00Z",
+      "end": "2025-09-12T20:30:00Z",
+      "signals": 138,
+      "trades": 14,
+      "skipped_rr": 17,
+      "skipped_entry": 107,
+      "unfinished": 0,
+      "wins": 2,
+      "losses": 12,
+      "winrate": 0.1429,
+      "winrate_ci": [
+        0.0401,
+        0.3994
+      ],
+      "expectancy": -0.397,
+      "expectancy_ci": [
+        -1.218,
+        0.782
+      ],
+      "profit_factor": 0.612,
+      "avg_bars_in_trade": 6.1,
+      "max_consec_losses": 4,
+      "total_pnl_pct": -5.5542,
+      "trade_list": [
+        {
+          "ts_entry": "2023-09-20T06:30:00Z",
+          "ts_exit": "2023-09-20T12:00:00Z",
+          "direction": "short",
+          "entry": 1932.24,
+          "stop": 1932.7840357142857,
+          "tp": 1923.42,
+          "exit": 1932.7840357142857,
+          "pnl_r": -1.4263,
+          "result": "loss"
+        },
+        {
+          "ts_entry": "2023-09-25T06:30:00Z",
+          "ts_exit": "2023-09-25T07:00:00Z",
+          "direction": "short",
+          "entry": 1924.21,
+          "stop": 1924.8087142857144,
+          "tp": 1919.94,
+          "exit": 1924.8087142857144,
+          "pnl_r": -1.3857,
+          "result": "loss"
+        },
+        {
+          "ts_entry": "2023-10-10T15:30:00Z",
+          "ts_exit": "2023-10-10T16:00:00Z",
+          "direction": "short",
+          "entry": 1859.72,
+          "stop": 1860.9568214285714,
+          "tp": 1854.76,
+          "exit": 1860.9568214285714,
+          "pnl_r": -1.1805,
+          "result": "loss"
+        },
+        {
+          "ts_entry": "2023-11-01T12:00:00Z",
+          "ts_exit": "2023-11-01T12:30:00Z",
+          "direction": "short",
+          "entry": 1986.66,
+          "stop": 1987.871892857143,
+          "tp": 1977.86,
+          "exit": 1987.871892857143,
+          "pnl_r": -1.1968,
+          "result": "loss"
+        },
+        {
+          "ts_entry": "2023-12-28T14:30:00Z",
+          "ts_exit": "2023-12-28T19:00:00Z",
+          "direction": "short",
+          "entry": 2079.2,
+          "stop": 2081.0850357142854,
+          "tp": 2071.22,
+          "exit": 2071.22,
+          "pnl_r": 4.0979,
+          "result": "win"
+        },
+        {
+          "ts_entry": "2024-01-05T14:00:00Z",
+          "ts_exit": "2024-01-05T14:30:00Z",
+          "direction": "short",
+          "entry": 2046.92,
+          "stop": 2048.0514285714285,
+          "tp": 2036.16,
+          "exit": 2048.0514285714285,
+          "pnl_r": -1.2172,
+          "result": "loss"
+        },
+        {
+          "ts_entry": "2024-04-18T06:00:00Z",
+          "ts_exit": "2024-04-18T10:30:00Z",
+          "direction": "short",
+          "entry": 2379.05,
+          "stop": 2382.9766785714287,
+          "tp": 2346.06,
+          "exit": 2382.9766785714287,
+          "pnl_r": -1.0728,
+          "result": "loss"
+        },
+        {
+          "ts_entry": "2024-07-12T14:00:00Z",
+          "ts_exit": "2024-07-12T15:00:00Z",
+          "direction": "short",
+          "entry": 2408.15,
+          "stop": 2409.8275000000003,
+          "tp": 2395.7,
+          "exit": 2409.8275000000003,
+          "pnl_r": -1.1723,
+          "result": "loss"
+        },
+        {
+          "ts_entry": "2024-08-07T05:30:00Z",
+          "ts_exit": "2024-08-07T10:30:00Z",
+          "direction": "short",
+          "entry": 2395.89,
+          "stop": 2397.9257857142857,
+          "tp": 2380.99,
+          "exit": 2397.9257857142857,
+          "pnl_r": -1.1413,
+          "result": "loss"
+        },
+        {
+          "ts_entry": "2024-11-11T10:00:00Z",
+          "ts_exit": "2024-11-11T10:30:00Z",
+          "direction": "short",
+          "entry": 2674.11,
+          "stop": 2676.267892857143,
+          "tp": 2663.74,
+          "exit": 2663.74,
+          "pnl_r": 4.6616,
+          "result": "win"
+        },
+        {
+          "ts_entry": "2024-11-28T06:30:00Z",
+          "ts_exit": "2024-11-28T08:30:00Z",
+          "direction": "short",
+          "entry": 2638.91,
+          "stop": 2640.6990357142854,
+          "tp": 2626.94,
+          "exit": 2640.6990357142854,
+          "pnl_r": -1.1771,
+          "result": "loss"
+        },
+        {
+          "ts_entry": "2025-01-06T00:30:00Z",
+          "ts_exit": "2025-01-06T01:00:00Z",
+          "direction": "short",
+          "entry": 2642.84,
+          "stop": 2644.7904642857143,
+          "tp": 2635.86,
+          "exit": 2644.7904642857143,
+          "pnl_r": -1.1627,
+          "result": "loss"
+        },
+        {
+          "ts_entry": "2025-04-25T20:30:00Z",
+          "ts_exit": "2025-04-27T22:00:00Z",
+          "direction": "short",
+          "entry": 3314.41,
+          "stop": 3319.9446428571428,
+          "tp": 3268.62,
+          "exit": 3319.9446428571428,
+          "pnl_r": -1.0719,
+          "result": "loss"
+        },
+        {
+          "ts_entry": "2025-08-12T15:00:00Z",
+          "ts_exit": "2025-08-13T08:30:00Z",
+          "direction": "short",
+          "entry": 3357.95,
+          "stop": 3361.644821428571,
+          "tp": 3335.92,
+          "exit": 3361.644821428571,
+          "pnl_r": -1.1091,
+          "result": "loss"
+        }
+      ],
+      "seconds": 1055.2,
+      "verdict": "\u043c\u0430\u043b\u043e \u0441\u0434\u0435\u043b\u043e\u043a (n=14)"
+    }
+  }
+}

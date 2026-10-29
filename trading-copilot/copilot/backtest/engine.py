@@ -352,10 +352,27 @@ class BacktestEngine:
                             end_ms=htf_end_ms,
                         )
                     else:
-                        # Mock / non-Binance source (e.g. tests): delegate to get_ohlc
-                        _ltf_df = self._source.get_ohlc(
-                            symbol, rule.entry_tf, ltf_bars_needed
+                        # Any other source: ask for the backtest's own window.
+                        # "The last N bars" is anchored to the end of what the
+                        # source holds, not to this frame — for a historical
+                        # window on an offline source it returns a different
+                        # period, the LTF scan finds nothing, and the run
+                        # reports zero trades instead of an error (R-2 again).
+                        ltf_start = df.index[0] - pd.Timedelta(
+                            minutes=ltf_min * _LTF_LOOKBACK_BARS
                         )
+                        ltf_end = df.index[-1] + pd.Timedelta(minutes=tf_min)
+                        try:
+                            _ltf_df = self._source.get_ohlc(
+                                symbol, rule.entry_tf,
+                                start_time=ltf_start.isoformat(),
+                                end_time=ltf_end.isoformat(),
+                            )
+                        except TypeError:
+                            # Source without range requests (test mocks)
+                            _ltf_df = self._source.get_ohlc(
+                                symbol, rule.entry_tf, ltf_bars_needed
+                            )
                 except Exception as exc:
                     # NOT a warning-and-continue: a rule that declares entry_tf
                     # has LTF confirmation as part of its definition. With
